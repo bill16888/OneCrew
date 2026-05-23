@@ -42,6 +42,29 @@ WORKDIR /app
 
 RUN apk add --no-cache libc6-compat openssl
 
+# Build-time placeholder env vars.
+#
+# `next build` evaluates server modules (including `lib/env.ts`) at
+# compile time to discover routes / generate static pages. `lib/env.ts`
+# uses zod to assert that required vars are present and `process.exit(1)`s
+# if any is missing — which would crash the build inside the Railway
+# Docker build environment, where the real prod secrets are NOT yet
+# injected (Railway only mounts service variables at *runtime*).
+#
+# We supply synthetic values that satisfy the schema at build time:
+#   - DATABASE_URL        — any non-empty string
+#   - DEEPSEEK_API_KEY    — any non-empty string
+#   - NEXTAUTH_SECRET     — must be ≥ 32 chars (zod rule)
+#
+# These are NEVER read at runtime: the real values from Railway's
+# Variables panel take precedence the moment the container starts.
+# The runtime container in stage 3 does not inherit these ENVs (it
+# only copies `.next/`, `node_modules/`, etc.), so there is no risk
+# of leaking the placeholders into production behaviour.
+ENV DATABASE_URL="postgresql://build:build@localhost:5432/build?schema=public" \
+    DEEPSEEK_API_KEY="sk-build-time-placeholder-replaced-at-runtime" \
+    NEXTAUTH_SECRET="build-time-placeholder-32-characters-minimum-length"
+
 # Reuse the pre-installed node_modules from the deps stage so we do not
 # re-run npm ci here. Anything written by `next build` lands in `.next/`.
 COPY --from=deps /app/node_modules ./node_modules
