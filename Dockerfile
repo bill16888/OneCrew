@@ -125,5 +125,14 @@ EXPOSE 3000
 ENTRYPOINT ["/sbin/tini", "--"]
 
 # Apply pending Prisma migrations against the configured DATABASE_URL,
-# then boot the custom server. We use the shell form so `&&` is honored.
-CMD ["sh", "-c", "npx prisma migrate deploy && npx tsx server.ts"]
+# then boot the custom server. We invoke `tsx` directly via its
+# `node_modules/.bin` script so the runtime never has to consult `npx`'s
+# prefix-resolution logic; the latter occasionally returns silently when
+# it can't find the package on Alpine, which made an earlier deploy
+# look like the container booted and died with no output. Wrapping in
+# `sh -c` keeps `&&` between the two commands working.
+#
+# `set -e` ensures a non-zero exit from prisma migrate (or anything
+# before `tsx`) surfaces as a container crash with a clear error,
+# instead of being swallowed.
+CMD ["sh", "-c", "set -e; echo '==> running prisma migrate deploy'; npx prisma migrate deploy; echo '==> starting server.ts via tsx'; exec node_modules/.bin/tsx server.ts"]

@@ -59,8 +59,17 @@ import { createIOServer } from './lib/realtime/io';
 /** Whether Next.js should run in development mode (HMR, source maps, etc.). */
 const dev = env.NODE_ENV !== 'production';
 
-/** Bind hostname for the HTTP server. The MVP runs on a single host. */
-const hostname = 'localhost';
+/** Bind hostname for the HTTP server.
+ *
+ * Defaults to `0.0.0.0` (listen on all interfaces) so the container's
+ * Railway-side healthcheck and external traffic can reach the server
+ * across the docker bridge. Listening on `localhost` would only accept
+ * connections from inside the container, which is invisible to
+ * Railway's healthcheck and would surface as a "Healthcheck failure"
+ * after a successful build + deploy. Set `HOSTNAME=localhost` in the
+ * environment for local-only dev runs that should be unreachable from
+ * outside the dev machine. */
+const hostname = process.env.HOSTNAME ?? '0.0.0.0';
 
 /** Listen port. Honors `PORT` env override; defaults to 3000. */
 const port = Number.parseInt(process.env.PORT ?? '', 10) || 3000;
@@ -105,7 +114,7 @@ async function bootstrap(): Promise<void> {
     // torn down by `stop()` in the shutdown handler below.
     AgenticLoop.start(io);
 
-    httpServer.listen(port, () => {
+    httpServer.listen(port, hostname, () => {
       // eslint-disable-next-line no-console
       console.log(`> Ready on http://${hostname}:${port}`);
 
