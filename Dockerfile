@@ -27,8 +27,11 @@ WORKDIR /app
 # Install OS deps required by Prisma and node-gyp at build time.
 RUN apk add --no-cache libc6-compat openssl
 
-COPY package.json package-lock.json ./
-RUN npm ci
+COPY package.json package-lock.json .npmrc ./
+# `--no-audit` and `--no-fund` keep build logs clean; `--prefer-offline`
+# uses the cache aggressively. `legacy-peer-deps` is honoured via the
+# committed `.npmrc` (see file-level comment there for why).
+RUN npm ci --no-audit --no-fund
 
 # ----------------------------------------------------------------------
 # Stage 2 — generate Prisma client and build Next.js
