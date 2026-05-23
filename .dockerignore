@@ -1,0 +1,36 @@
+# Source-tree noise the image does not need.
+node_modules
+.next
+.git
+.gitignore
+.gitattributes
+.github
+
+# Local secrets — never bake these into an image.
+.env
+.env.*
+!.env.example
+
+# Editor / OS metadata
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Test / build outputs that should be regenerated inside the image.
+coverage
+dist
+*.log
+*.tmp
+*.tsbuildinfo
+
+# Spec / docs (not needed at runtime; keep image small).
+.kiro
+README.md
+docs
+
+# Misc local files
+*.local
+.docker
+docker-compose*.yml
+Dockerfile

@@ -1,0 +1,103 @@
+# syntax=docker/dockerfile:1.6
+#
+# AI-Native Team Workspace — production container.
+#
+# Three-stage build to keep the runtime image small and free of build
+# tooling:
+#
+#   1. deps    — install npm dependencies (incl. devDeps for the build).
+#   2. builder — generate Prisma client, run `next build`.
+#   3. runner  — copy the build artifacts + production node_modules and
+#                run the custom server (Next.js + Socket.io + Agentic Loop).
+#
+# The custom `server.ts` orchestrates Next.js HTTP, Socket.io, and the
+# Agentic Loop in a single process (see design.md → "进程拓扑"). We
+# execute it via `tsx` instead of pre-compiling to `server.js` because
+# the file imports both server-only Node modules (`socket.io`,
+# `next-auth/jwt`) and `@/...` aliases configured in `tsconfig.json` —
+# `tsx` resolves both at runtime without an extra tsc step.
+
+# ----------------------------------------------------------------------
+# Stage 1 — install all npm dependencies (including dev) for the build
+# ----------------------------------------------------------------------
+FROM node:20-alpine AS deps
+
+WORKDIR /app
+
+# Install OS deps required by Prisma and node-gyp at build time.
+RUN apk add --no-cache libc6-compat openssl
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+# ----------------------------------------------------------------------
+# Stage 2 — generate Prisma client and build Next.js
+# ----------------------------------------------------------------------
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+RUN apk add --no-cache libc6-compat openssl
+
+# Reuse the pre-installed node_modules from the deps stage so we do not
+# re-run npm ci here. Anything written by `next build` lands in `.next/`.
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+
+# Generate the Prisma client first so the build can `import { ... } from
+# '@prisma/client'` without falling back to the default stub. Then build
+# Next.js — `output` defaults to the standard `.next/` directory.
+RUN npx prisma generate
+RUN npm run build
+
+# ----------------------------------------------------------------------
+# Stage 3 — minimal production runtime
+# ----------------------------------------------------------------------
+FROM node:20-alpine AS runner
+
+WORKDIR /app
+
+# OpenSSL is needed by both Prisma and bcryptjs at runtime; libc6-compat
+# keeps native modules happy on Alpine.
+RUN apk add --no-cache libc6-compat openssl tini
+
+ENV NODE_ENV=production \
+    PORT=3000 \
+    HOSTNAME=0.0.0.0
+
+# Run as a non-root user for least privilege.
+RUN addgroup --system --gid 1001 nodejs \
+ && adduser --system --uid 1001 nextjs
+
+# Copy the build artifacts. We copy `node_modules` from `deps` because
+# the build itself does not prune devDependencies; for an image
+# absolutely free of devDeps you can switch to `npm ci --omit=dev` here.
+COPY --from=builder --chown=nextjs:nodejs /app/.next ./.next
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
+COPY --from=builder --chown=nextjs:nodejs /app/package.json ./package.json
+COPY --from=builder --chown=nextjs:nodejs /app/server.ts ./server.ts
+COPY --from=builder --chown=nextjs:nodejs /app/tsconfig.json ./tsconfig.json
+COPY --from=builder --chown=nextjs:nodejs /app/lib ./lib
+COPY --from=builder --chown=nextjs:nodejs /app/app ./app
+COPY --from=builder --chown=nextjs:nodejs /app/components ./components
+COPY --from=builder --chown=nextjs:nodejs /app/store ./store
+COPY --from=builder --chown=nextjs:nodejs /app/hooks ./hooks
+COPY --from=builder --chown=nextjs:nodejs /app/types ./types
+COPY --from=builder --chown=nextjs:nodejs /app/middleware.ts ./middleware.ts
+COPY --from=builder --chown=nextjs:nodejs /app/next.config.mjs ./next.config.mjs
+COPY --from=builder --chown=nextjs:nodejs /app/next-env.d.ts ./next-env.d.ts
+
+USER nextjs
+
+EXPOSE 3000
+
+# `tini` reaps zombie processes and forwards SIGTERM cleanly so the
+# server.ts shutdown handler (AgenticLoop.stop / io.close / httpServer.close)
+# actually fires when `docker stop` is issued.
+ENTRYPOINT ["/sbin/tini", "--"]
+
+# Apply pending Prisma migrations against the configured DATABASE_URL,
+# then boot the custom server. We use the shell form so `&&` is honored.
+CMD ["sh", "-c", "npx prisma migrate deploy && npx tsx server.ts"]

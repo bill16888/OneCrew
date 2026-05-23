@@ -1,0 +1,43 @@
+name: CI
+
+# Run on every push to main and on every pull request targeting main.
+# This is the lightweight gate (typecheck + lint + Prisma client gen);
+# end-to-end tests live in a separate workflow because they need a
+# full PostgreSQL + Redis + Anthropic stack.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    name: Typecheck & Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Prisma's generated client is required for `tsc` to resolve
+      # imports from `@prisma/client`. We generate it before any TS
+      # step so type information is available to the linter and the
+      # typecheck.
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint

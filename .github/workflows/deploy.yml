@@ -1,0 +1,40 @@
+name: Deploy to Railway
+
+# Auto-deploy main pushes to Railway. This workflow assumes the CI
+# workflow above has already run on the same commit (GitHub Actions
+# runs both in parallel by default). For strict ordering, gate this
+# job on `needs: [check]` referring to the CI job from `ci.yml` once
+# the workflows are unified.
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    name: Railway Deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Skip the deploy when RAILWAY_TOKEN is not configured (local fork
+    # PRs or before the first secret is added). The job still runs but
+    # the actual deploy step is gated below.
+    if: github.repository_owner != ''
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Railway CLI
+        run: npm install --global @railway/cli
+
+      - name: Deploy
+        env:
+          # Provided via repo Settings → Secrets → Actions.
+          # Without it the CLI prints an error and exits non-zero,
+          # which surfaces here as a failed deploy step (intentional).
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: railway up --detach

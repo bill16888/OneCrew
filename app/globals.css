@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Dark-theme tokens (Requirements 9.1, 9.2, 9.3).
+ *  - Background: #0A0A0A
+ *  - Primary: Indigo #6366F1
+ *  - AI Badge gradient: #A855F7 → #6366F1 (use bg-ai-gradient)
+ *
+ * The whole MVP is dark-only, so we apply the `dark` class on <html> in
+ * app/layout.tsx and force color-scheme: dark here.
+ */
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html,
+  body {
+    @apply h-full bg-background text-foreground antialiased;
+  }
+
+  body {
+    font-family:
+      Inter,
+      system-ui,
+      -apple-system,
+      'Segoe UI',
+      sans-serif;
+  }
+
+  /* AI message left accent — used by components/channel/MessageRow.tsx */
+  .ai-message-accent {
+    @apply border-l-2 border-ai pl-3;
+  }
+}
+
+@layer components {
+  /* AI Badge gradient surface */
+  .ai-badge {
+    @apply inline-flex items-center gap-1 rounded-full bg-ai-gradient px-2 py-0.5 text-xs font-medium text-white;
+  }
+}

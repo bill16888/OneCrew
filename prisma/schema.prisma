@@ -1,0 +1,115 @@
+// AI-Native Team Workspace — Prisma schema
+// Reference: .kiro/specs/ai-native-team-workspace/design.md  (Data Models)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Workspace {
+  id          String     @id @default(cuid())
+  name        String
+  channels    Channel[]
+  users       User[]
+  tasks       Task[]
+  approvals   Approval[]
+  taskCounter Int        @default(0) // 用于生成 PROJ-{N} 的单调计数
+  createdAt   DateTime   @default(now())
+}
+
+model User {
+  id            String     @id @default(cuid())
+  email         String     @unique
+  passwordHash  String? // 仅人类用户使用
+  name          String
+  avatarUrl     String?
+  isAI          Boolean    @default(false)
+  aiRole        String? // 'Ada' | 'Hopper'
+  workspaceId   String
+  workspace     Workspace  @relation(fields: [workspaceId], references: [id])
+  messages      Message[]
+  tasksCreated  Task[]     @relation("TaskCreator")
+  tasksAssigned Task[]     @relation("TaskAssignee")
+  approvals     Approval[]
+  createdAt     DateTime   @default(now())
+
+  @@index([workspaceId])
+  @@index([isAI])
+}
+
+model Channel {
+  id          String    @id @default(cuid())
+  name        String
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  messages    Message[]
+  createdAt   DateTime  @default(now())
+
+  @@index([workspaceId])
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  channelId String
+  channel   Channel  @relation(fields: [channelId], references: [id])
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  content   String   @db.Text
+  metadata  Json? // 工具调用、引用任务等结构化信息
+  createdAt DateTime @default(now())
+
+  @@index([channelId, createdAt])
+}
+
+enum TaskStatus {
+  Backlog
+  InProgress
+  InReview
+  Done
+}
+
+model Task {
+  id          String     @id @default(cuid())
+  taskId      String     @unique // PROJ-{N}
+  title       String
+  description String?    @db.Text
+  status      TaskStatus @default(Backlog)
+  isAITask    Boolean    @default(false)
+  workspaceId String
+  workspace   Workspace  @relation(fields: [workspaceId], references: [id])
+  creatorId   String
+  creator     User       @relation("TaskCreator", fields: [creatorId], references: [id])
+  assigneeId  String?
+  assignee    User?      @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([workspaceId, status])
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model Approval {
+  id          String         @id @default(cuid())
+  workspaceId String
+  workspace   Workspace      @relation(fields: [workspaceId], references: [id])
+  aiUserId    String
+  aiUser      User           @relation(fields: [aiUserId], references: [id])
+  action      String // 例如 "create_task" / "send_channel_message"
+  payload     Json
+  status      ApprovalStatus @default(PENDING)
+  decidedById String?
+  decidedAt   DateTime?
+  createdAt   DateTime       @default(now())
+
+  @@index([workspaceId, status])
+  @@index([aiUserId, status])
+}

@@ -1,0 +1,32 @@
+# Railway service configuration for AI-Native Team Workspace.
+#
+# Railway picks up this file at the repository root and uses it both
+# during the build (Dockerfile mode) and at runtime (start command,
+# health check, restart policy). Pair it with a `Procfile`-free
+# Dockerfile-only setup so the build stays reproducible across
+# Railway, Docker Compose, and local CI runners.
+#
+# Notes:
+#   - `startCommand` must produce a server listening on `$PORT`.
+#     Railway injects `PORT` as the public ingress port; our
+#     `server.ts` already honors `process.env.PORT` and defaults to
+#     3000 in non-Railway environments.
+#   - `healthcheckPath = /api/health` matches the route added in P0
+#     fix #2; Railway will mark the deploy as healthy once it returns
+#     a 200.
+#   - `restartPolicyType = ON_FAILURE` keeps a successful exit (rare
+#     for a long-lived server) from being interpreted as a crash loop.
+
+[build]
+builder = "DOCKERFILE"
+
+[deploy]
+# `npx prisma migrate deploy` applies pending Prisma migrations
+# against `$DATABASE_URL` before the server starts. Use `tsx` to run
+# the custom `server.ts` so the path-mapped `@/...` imports resolve
+# without a separate compile step (matches the in-image runner).
+startCommand = "npx prisma migrate deploy && npx tsx server.ts"
+healthcheckPath = "/api/health"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3

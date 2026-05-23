@@ -1,0 +1,25 @@
+{
+  // Optional ahead-of-time build target for `server.ts` when a deploy
+  // environment cannot run `tsx` directly. The default Dockerfile +
+  // Railway flow still uses `tsx` for parity with `npm run dev`, so
+  // this config is not invoked unless you opt in via:
+  //
+  //   npx tsc --project tsconfig.server.json
+  //
+  // The output `server.js` lands at the repo root (matches the
+  // `node server.js` invocation pattern requested by the prompt).
+  // Path-mapped `@/...` imports do NOT survive `tsc` alone — pair
+  // this with `tsc-alias` or rewrite to relative paths before
+  // shipping a `node server.js` build.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": ".",
+    "module": "commonjs",
+    "target": "es2020",
+    "noEmit": false,
+    "isolatedModules": false,
+    "incremental": false,
+    "skipLibCheck": true
+  },
+  "include": ["server.ts"]
+}

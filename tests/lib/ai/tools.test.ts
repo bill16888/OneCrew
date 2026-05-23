@@ -1,0 +1,181 @@
+/**
+ * @file Property tests for `lib/ai/tools/`.
+ *
+ * Covers:
+ *   - Property 12 (工具表面恒等): TOOL_DEFINITIONS is exactly the
+ *     6-tool set, in stable order.
+ *   - Property 13 (工具调度全函数性): dispatchTool never throws and
+ *     returns a `tool_result`; unknown tools and schema failures yield
+ *     `is_error: true`.
+ *   - Property 14 (Mock 工具的纯净性): the two mock tools are
+ *     deterministic and do not touch fs / network.
+ *
+ * Validates: P2 tasks 6.7, 6.8, 7.10. Service-layer branches
+ * (create_task / update_task_status / send_channel_message /
+ * request_approval) are mocked at the module boundary so the tests
+ * stay free of Prisma / Socket.io.
+ */
+
+import '../../setup';
+
+import { describe, expect, it, vi } from 'vitest';
+import fc from 'fast-check';
+
+vi.mock('@/lib/services/task.service', () => ({
+  TaskService: {
+    create: vi.fn(async () => ({
+      taskId: 'PROJ-1',
+      title: 'mocked',
+    })),
+    updateStatus: vi.fn(async () => ({
+      taskId: 'PROJ-1',
+      status: 'InProgress',
+    })),
+    list: vi.fn(async () => []),
+  },
+}));
+
+vi.mock('@/lib/services/message.service', () => ({
+  MessageService: {
+    create: vi.fn(async () => ({
+      id: 'msg_test',
+      content: 'mocked',
+    })),
+    listByChannel: vi.fn(async () => []),
+  },
+  ValidationError: class ValidationError extends Error {},
+}));
+
+vi.mock('@/lib/services/approval.service', () => ({
+  ApprovalService: {
+    create: vi.fn(async () => ({ id: 'app_test', status: 'PENDING' })),
+    approve: vi.fn(),
+    reject: vi.fn(),
+    listPendingForAI: vi.fn(async () => []),
+    isStale: vi.fn(() => false),
+  },
+}));
+
+import {
+  dispatchTool,
+  TOOL_DEFINITIONS,
+  TOOL_NAMES,
+  type ToolName,
+} from '@/lib/ai/tools';
+import {
+  mockReadProjectDocs,
+  mockWebSearch,
+} from '@/lib/ai/tools/mocks';
+
+const EXPECTED_TOOL_SET: readonly string[] = [
+  'create_task',
+  'update_task_status',
+  'request_approval',
+  'send_channel_message',
+  'mock_web_search',
+  'mock_read_project_docs',
+];
+
+describe('Feature: ai-native-team-workspace, Property 12: 工具表面恒等', () => {
+  it('exposes exactly the 6 expected tools as a set', () => {
+    const names = new Set(TOOL_DEFINITIONS.map((t) => t.name));
+    expect(names).toEqual(new Set(EXPECTED_TOOL_SET));
+    expect(TOOL_DEFINITIONS).toHaveLength(6);
+    expect(TOOL_NAMES).toHaveLength(6);
+  });
+
+  it('every TOOL_DEFINITIONS entry has matching name in TOOL_NAMES', () => {
+    for (const def of TOOL_DEFINITIONS) {
+      expect(TOOL_NAMES).toContain(def.name as ToolName);
+    }
+  });
+});
+
+describe('Feature: ai-native-team-workspace, Property 13: 工具调度的全函数性', () => {
+  it('returns is_error=true for any tool name outside TOOL_NAMES', async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc
+          .string({ minLength: 1, maxLength: 30 })
+          .filter((s) => !(EXPECTED_TOOL_SET as string[]).includes(s)),
+        async (name) => {
+          const result = await dispatchTool(
+            { aiUserId: 'u_test' },
+            { id: 't1', name, input: {} },
+          );
+          expect(result.type).toBe('tool_result');
+          expect(result.tool_use_id).toBe('t1');
+          expect(result.is_error).toBe(true);
+          expect(String(result.content)).toContain('Unknown tool');
+        },
+      ),
+      { numRuns: 100 },
+    );
+  });
+
+  it('returns is_error=true on schema mismatch for known tools', async () => {
+    // `create_task` requires a non-empty `title`. Drive arbitrary
+    // garbage payloads that should always fail the zod schema.
+    const arbBadPayload = fc.oneof(
+      fc.constant({}),
+      fc.constant({ title: '' }),
+      fc.constant({ title: 123 }),
+      fc.constant({ wrongField: 'x' }),
+    );
+    await fc.assert(
+      fc.asyncProperty(arbBadPayload, async (input) => {
+        const result = await dispatchTool(
+          { aiUserId: 'u_test' },
+          { id: 't1', name: 'create_task', input },
+        );
+        expect(result.is_error).toBe(true);
+        expect(String(result.content)).toContain('Invalid arguments');
+      }),
+      { numRuns: 50 },
+    );
+  });
+
+  it('never throws regardless of input shape', async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.string({ minLength: 1, maxLength: 30 }),
+        fc.anything(),
+        async (name, input) => {
+          // Wrap in a try so a regression that *does* throw fails
+          // loudly with a descriptive message.
+          let threw = false;
+          try {
+            await dispatchTool(
+              { aiUserId: 'u_test' },
+              { id: 'tx', name, input },
+            );
+          } catch {
+            threw = true;
+          }
+          expect(threw).toBe(false);
+        },
+      ),
+      { numRuns: 100 },
+    );
+  });
+});
+
+describe('Feature: ai-native-team-workspace, Property 14: Mock 工具的纯净性', () => {
+  it('mockWebSearch is deterministic for any string input', () => {
+    fc.assert(
+      fc.property(fc.string({ maxLength: 200 }), (q) => {
+        expect(mockWebSearch(q)).toBe(mockWebSearch(q));
+      }),
+      { numRuns: 100 },
+    );
+  });
+
+  it('mockReadProjectDocs is deterministic for any string input', () => {
+    fc.assert(
+      fc.property(fc.string({ maxLength: 200 }), (p) => {
+        expect(mockReadProjectDocs(p)).toBe(mockReadProjectDocs(p));
+      }),
+      { numRuns: 100 },
+    );
+  });
+});

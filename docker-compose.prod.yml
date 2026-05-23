@@ -1,0 +1,88 @@
+# docker-compose.prod.yml — production stack for AI-Native Team Workspace.
+#
+# Three services share a private bridge network:
+#
+#   - app       Next.js + Socket.io + Agentic Loop (single process,
+#               built from the local Dockerfile).
+#   - postgres  PostgreSQL 16 used by Prisma. Only reachable from
+#               the compose network (no host port published).
+#   - redis     Redis 7 reserved for future task queue / rate-limit
+#               work. Only reachable from the compose network.
+#
+# Bring up: `npm run docker:up` (alias for `docker-compose -f
+# docker-compose.prod.yml up -d`). Logs: `npm run docker:logs`.
+#
+# Secrets / config are injected through `.env.prod`; lib/env.ts validates
+# every required variable on container start and crashes with a clear
+# diagnostic when something is missing.
+
+version: '3.9'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ai-workspace:latest
+    container_name: ai-workspace-app
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    environment:
+      # Override the URLs so the app talks to the sibling services on
+      # the compose network rather than `localhost` (which would resolve
+      # inside the container itself).
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ai_workspace?schema=public
+      REDIS_URL: redis://redis:6379
+      NODE_ENV: production
+    ports:
+      - '3000:3000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - internal
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: ai-workspace-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ai_workspace
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    expose:
+      # Port reachable to other services on the same compose network
+      # but NOT published to the host.
+      - '5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d ai_workspace']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - internal
+
+  redis:
+    image: redis:7-alpine
+    container_name: ai-workspace-redis
+    restart: unless-stopped
+    command: ['redis-server', '--save', '60', '1', '--loglevel', 'warning']
+    volumes:
+      - redis_data:/data
+    expose:
+      - '6379'
+    networks:
+      - internal
+
+volumes:
+  pg_data:
+  redis_data:
+
+networks:
+  internal:
+    driver: bridge
