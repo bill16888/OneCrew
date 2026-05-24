@@ -157,6 +157,17 @@ export function getClientSocket(): AppClientSocket {
     reconnectionAttempts: Number.POSITIVE_INFINITY,
     reconnectionDelay: 500,
     autoConnect: true,
+    // Pin transports to long-polling. Railway's edge proxy hands
+    // ordinary HTTP requests through reliably, but the WebSocket
+    // upgrade handshake fails inconsistently in production
+    // (`WebSocket is closed before the connection is established`),
+    // which kills the entire socket.io session and blocks
+    // realtime events. Long-polling adds ~500ms of latency over a
+    // healthy WS upgrade but gives us deterministic delivery on the
+    // hosted environment. Swap back to `['polling', 'websocket']`
+    // (the library default) once Railway's WS proxy settles, or
+    // when the deploy moves off Railway.
+    transports: ['polling'],
     auth: (cb: (payload: { sessionToken: string }) => void) => {
       // The callback must remain synchronous from socket.io's perspective,
       // but we can still await `getSession()` and invoke `cb` once we
@@ -166,7 +177,7 @@ export function getClientSocket(): AppClientSocket {
         cb({ sessionToken });
       });
     },
-  } as const;
+  };
 
   // `socket.io-client` accepts either `(url, opts)` or `(opts)`. We pass
   // the URL only when we have one so that omitting `NEXT_PUBLIC_SOCKET_URL`
