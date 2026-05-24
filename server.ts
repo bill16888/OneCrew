@@ -83,6 +83,16 @@ const port = Number.parseInt(process.env.PORT ?? '', 10) || 3000;
  * code 1 so the supervisor (or `tsx watch`) can react.
  */
 async function bootstrap(): Promise<void> {
+  // First-line liveness marker. Printed before *any* dependency
+  // resolution / Next.js prepare so a "container booted but logs are
+  // empty" deploy failure is impossible. If this never shows up in
+  // Deploy Logs, the problem is in the container start command itself
+  // (PATH, missing tsx, etc.), not in the application.
+  // eslint-disable-next-line no-console
+  console.log(
+    `[server] bootstrap starting: NODE_ENV=${env.NODE_ENV} hostname=${hostname} port=${port}`,
+  );
+
   const app = next({ dev, hostname, port });
   const handler = app.getRequestHandler();
 

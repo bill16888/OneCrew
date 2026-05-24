@@ -25,7 +25,12 @@ builder = "DOCKERFILE"
 # against `$DATABASE_URL` before the server starts. Use `tsx` to run
 # the custom `server.ts` so the path-mapped `@/...` imports resolve
 # without a separate compile step (matches the in-image runner).
-startCommand = "npx prisma migrate deploy && npx tsx server.ts"
+#
+# We embed echo markers around each step so a healthcheck failure
+# can be diagnosed from Deploy Logs alone — without them, Railway
+# truncates after the last prisma line and we cannot tell whether
+# `tsx server.ts` even started.
+startCommand = "echo '==> [railway] running prisma migrate deploy'; npx prisma migrate deploy; echo '==> [railway] launching server.ts via tsx'; node node_modules/tsx/dist/cli.mjs server.ts"
 healthcheckPath = "/api/health"
 healthcheckTimeout = 30
 restartPolicyType = "ON_FAILURE"
