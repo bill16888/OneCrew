@@ -21,16 +21,13 @@
 builder = "DOCKERFILE"
 
 [deploy]
-# `npx prisma migrate deploy` applies pending Prisma migrations
-# against `$DATABASE_URL` before the server starts. Use `tsx` to run
-# the custom `server.ts` so the path-mapped `@/...` imports resolve
-# without a separate compile step (matches the in-image runner).
-#
-# We embed echo markers around each step so a healthcheck failure
-# can be diagnosed from Deploy Logs alone — without them, Railway
-# truncates after the last prisma line and we cannot tell whether
-# `tsx server.ts` even started.
-startCommand = "echo '==> [railway] running prisma migrate deploy'; npx prisma migrate deploy; echo '==> [railway] launching server.ts via tsx'; node node_modules/tsx/dist/cli.mjs server.ts"
+# We intentionally OMIT `startCommand` so Railway uses the
+# Dockerfile's `CMD` directive instead. The CMD is wrapped in
+# `sh -c "..."` so multi-step commands (`set -e`, echo markers,
+# `npx prisma migrate deploy`, then `exec node_modules/.bin/tsx
+# server.ts`) are evaluated by a real shell. When startCommand is
+# present here, Railway runs it via docker exec with no shell, which
+# silently drops everything after the first `;` / `&&`.
 healthcheckPath = "/api/health"
 healthcheckTimeout = 30
 restartPolicyType = "ON_FAILURE"
