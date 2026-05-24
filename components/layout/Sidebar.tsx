@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Hash, ListChecks, Loader2, Sparkles, X } from 'lucide-react';
@@ -49,18 +50,14 @@ interface AITeammate {
 }
 
 /**
- * Mock channel list — placeholder for the `/api/channels` GET response
- * landing in task 3.6. Covers the channels the task brief calls out
- * (`#general`, `#engineering`, `#incidents`); the first two also match
- * the seeded channels in `prisma/seed.ts`. The shape is already
- * `Channel[]`, so swapping this constant for the API call is a one-line
- * change. Per task 2.3, the dynamic-route `channelId` segment uses the
- * channel name as a placeholder until the real DB id is wired through.
+ * Hard-coded fallback channel list shown only on the very first
+ * client paint (before `/api/channels` resolves). The IDs match the
+ * seeded rows in `prisma/seed.ts` so the fallback never produces
+ * dead links if the fetch races with first-render hydration.
  */
-const MOCK_CHANNELS: readonly Channel[] = [
-  { id: 'general', name: 'general' },
-  { id: 'engineering', name: 'engineering' },
-  { id: 'incidents', name: 'incidents' },
+const FALLBACK_CHANNELS: readonly Channel[] = [
+  { id: 'chan_general', name: 'general' },
+  { id: 'chan_engineering', name: 'engineering' },
 ];
 
 const MOCK_AI_TEAMMATES: readonly AITeammate[] = [
@@ -82,6 +79,34 @@ export function Sidebar() {
   // both layouts.
   const isMobileSidebarOpen = useWorkspaceStore((s) => s.isMobileSidebarOpen);
   const closeMobileSidebar = useWorkspaceStore((s) => s.closeMobileSidebar);
+
+  /**
+   * Real channel list, hydrated once from `/api/channels` on mount and
+   * re-fetched whenever a future event invalidates it (currently never;
+   * the MVP creates channels only via seed). Initial state holds the
+   * fallback so the sidebar paints sensible content even before the
+   * fetch resolves.
+   */
+  const [channels, setChannels] = useState<readonly Channel[]>(
+    FALLBACK_CHANNELS,
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/channels', { credentials: 'same-origin' })
+      .then((res) => (res.ok ? (res.json() as Promise<Channel[]>) : null))
+      .then((data) => {
+        if (!cancelled && data && data.length > 0) {
+          setChannels(data);
+        }
+      })
+      .catch(() => {
+        // Swallow network errors — fallback channels stay rendered.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   /**
    * A channel row is active when:
@@ -138,7 +163,7 @@ export function Sidebar() {
         <nav className="flex flex-1 flex-col gap-6 overflow-y-auto">
           <SidebarSection title="Channels">
             <ul className="flex flex-col gap-0.5">
-              {MOCK_CHANNELS.map((channel) => (
+              {channels.map((channel) => (
                 <li key={channel.id}>
                   <Link
                     href={`/channels/${channel.id}`}

@@ -233,10 +233,10 @@ async function buildInitialContext(
 ): Promise<MessageParam[]> {
   const lookbackStart = new Date(Date.now() - RECENT_MESSAGE_LOOKBACK_MS);
 
-  // The two reads are independent and pure (read-only); fire them in
-  // parallel so the cycle's startup latency is bounded by the slower
-  // of the two queries rather than their sum.
-  const [recentMessages, inProgressTasks] = await Promise.all([
+  // The three reads are independent and pure (read-only); fire them in
+  // parallel so the cycle's startup latency is bounded by the slowest
+  // of the queries rather than their sum.
+  const [recentMessages, inProgressTasks, allChannels] = await Promise.all([
     prisma.message.findMany({
       where: {
         createdAt: { gte: lookbackStart },
@@ -253,6 +253,17 @@ async function buildInitialContext(
       where: { workspaceId, status: 'InProgress' },
       orderBy: { createdAt: 'asc' },
       include: { assignee: { select: { name: true } } },
+    }),
+    // Pulling every channel in the workspace is cheap (the MVP keeps
+    // the channel set tiny) and lets us inject a *concrete* channel
+    // directory into the initial prompt so the model never has to
+    // guess `channelId` arguments for `send_channel_message`. Without
+    // this, the AI invented IDs like `general` (instead of the seeded
+    // `chan_general`), tripping the `Message_channelId_fkey` FK.
+    prisma.channel.findMany({
+      where: { workspaceId },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true },
     }),
   ]);
 
@@ -276,7 +287,19 @@ async function buildInitialContext(
           })
           .join('\n');
 
+  // Channel directory: surface the canonical (id, name) pairs so the
+  // model has a closed list to draw from when issuing
+  // `send_channel_message({ channelId, ... })`. Empty workspaces fall
+  // back to a clear placeholder so the prompt remains parseable.
+  const channelDigest =
+    allChannels.length === 0
+      ? '(no channels exist yet)'
+      : allChannels
+          .map((c) => `- id="${c.id}" name="#${c.name}"`)
+          .join('\n');
+
   const content =
+    `Available channels (use the literal id when calling send_channel_message):\n${channelDigest}\n\n` +
     `Recent channel digest:\n${messageDigest}\n\n` +
     `In-progress tasks:\n${taskDigest}`;
 
