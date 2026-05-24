@@ -232,7 +232,7 @@ export async function approve(
   decidedById: string,
 ): Promise<Approval> {
   const approval = await prisma.approval.update({
-    where: { id },
+    where: { id, status: 'PENDING' },
     data: {
       status: 'APPROVED',
       decidedById,
@@ -286,7 +286,7 @@ export async function reject(
   decidedById: string,
 ): Promise<Approval> {
   const approval = await prisma.approval.update({
-    where: { id },
+    where: { id, status: 'PENDING' },
     data: {
       status: 'REJECTED',
       decidedById,
