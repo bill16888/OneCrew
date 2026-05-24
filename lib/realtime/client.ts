@@ -157,16 +157,18 @@ export function getClientSocket(): AppClientSocket {
     reconnectionAttempts: Number.POSITIVE_INFINITY,
     reconnectionDelay: 500,
     autoConnect: true,
-    // Allow the default transport stack: long-polling first, then
-    // upgrade to WebSocket. Earlier we pinned this to `['polling']`
-    // because Railway's edge proxy was returning 400 on the upgrade
-    // handshake — but the real cause was Next.js's catch-all handler
-    // intercepting `/socket.io/...` polls before socket.io could
-    // respond (see the request-listener split in `server.ts`). With
-    // that fixed, the standard polling→WS upgrade is safe and gives
-    // us proper realtime latency. Falling back to polling alone
-    // would still work, just slower.
-    transports: ['polling', 'websocket'],
+    // Pin to long-polling. We tried `['polling', 'websocket']` first;
+    // polling worked but socket.io's automatic upgrade to WebSocket
+    // consistently fails on Railway's edge proxy with
+    // `WebSocket is closed before the connection is established`,
+    // even after we routed `/socket.io/...` past Next.js. The
+    // upgrade failure is non-fatal — socket.io stays on polling and
+    // events keep flowing — but it spams the console with red
+    // warnings on every reconnect and re-runs the upgrade probe
+    // forever. Pinning to polling-only gives us a clean console and
+    // identical functionality at the cost of ~500ms of additional
+    // tail latency vs. a healthy WS connection.
+    transports: ['polling'],
     auth: (cb: (payload: { sessionToken: string }) => void) => {
       // The callback must remain synchronous from socket.io's perspective,
       // but we can still await `getSession()` and invoke `cb` once we
