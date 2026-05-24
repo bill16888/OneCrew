@@ -132,7 +132,21 @@ ENTRYPOINT ["/sbin/tini", "--"]
 # look like the container booted and died with no output. Wrapping in
 # `sh -c` keeps `&&` between the two commands working.
 #
-# `set -e` ensures a non-zero exit from prisma migrate (or anything
+# We use `prisma db push --accept-data-loss` instead of `prisma migrate
+# deploy` because:
+#   1. `db push` syncs the schema directly without needing a hand-
+#      authored migration history. Our MVP does not require migration
+#      versioning yet (the data model is greenfield, no production
+#      records to preserve), and `migrate deploy` previously failed
+#      with `P3015` because the diff-generated migration.sql was not
+#      recognised as a complete migration entry.
+#   2. `--accept-data-loss` is a no-op on first push (empty DB) and
+#      lets later schema iterations succeed without manual intervention.
+#      In a future release where we want strict migration history, swap
+#      back to `migrate deploy` and ship a properly-generated
+#      migration directory.
+#
+# `set -e` ensures a non-zero exit from prisma push (or anything
 # before `tsx`) surfaces as a container crash with a clear error,
 # instead of being swallowed.
-CMD ["sh", "-c", "set -e; echo '==> running prisma migrate deploy'; npx prisma migrate deploy; echo '==> starting server.ts via tsx'; exec node_modules/.bin/tsx server.ts"]
+CMD ["sh", "-c", "set -e; echo '==> running prisma db push'; npx prisma db push --accept-data-loss --skip-generate; echo '==> starting server.ts via tsx'; exec node_modules/.bin/tsx server.ts"]
