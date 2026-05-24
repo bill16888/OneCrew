@@ -43,20 +43,33 @@ export interface TimeAgoProps {
 export function TimeAgo({ date, className, intervalMs = 60_000 }: TimeAgoProps) {
   const resolved = typeof date === 'string' ? new Date(date) : date;
 
-  // The state value is unused except to trigger re-renders on each tick.
+  // SSR / first-paint guard: `formatDistanceToNow` depends on the
+  // current wall-clock time, which is necessarily different between
+  // the server render and the browser's first render moments later.
+  // That mismatch trips React's hydration check (Minified React
+  // error #418) and aborts the entire client tree — including
+  // `<ChannelView>`, which means Socket.io never subscribes and
+  // realtime events never arrive. We dodge it by rendering a stable
+  // placeholder on first render, then swap to the real label on
+  // mount via `useEffect`. Subsequent ticks update the label normally.
+  const [mounted, setMounted] = useState(false);
+  // Used only to force re-renders on the interval tick.
   const [, setTick] = useState(0);
 
   useEffect(() => {
+    setMounted(true);
     if (intervalMs <= 0) return;
     const id = setInterval(() => setTick((n) => n + 1), intervalMs);
     return () => clearInterval(id);
   }, [intervalMs]);
 
   const iso = resolved.toISOString();
-  const label = formatDistanceToNow(resolved, { addSuffix: true });
+  const label = mounted
+    ? formatDistanceToNow(resolved, { addSuffix: true })
+    : '';
 
   return (
-    <time dateTime={iso} className={cn(className)}>
+    <time dateTime={iso} className={cn(className)} suppressHydrationWarning>
       {label}
     </time>
   );
