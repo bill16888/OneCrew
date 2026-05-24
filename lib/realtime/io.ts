@@ -38,6 +38,7 @@ import { Server as SocketIOServer } from 'socket.io';
 
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
+import prisma from '@/lib/prisma';
 
 import type {
   ClientToServerEvents,
@@ -227,11 +228,22 @@ export function createIOServer(httpServer: HTTPServer): AppIOServer {
 
     // Per-channel `message:new` events require an explicit subscription so
     // a client only receives traffic for channels it is actively viewing.
-    socket.on('subscribe:channel', (channelId: string) => {
+    // Validate the channel exists in the database before joining the room
+    // — prevents clients from subscribing to non-existent channel ids.
+    socket.on('subscribe:channel', async (channelId: string) => {
       if (typeof channelId !== 'string' || channelId.length === 0) {
         return;
       }
-      void socket.join(`channel:${channelId}`);
+      try {
+        const channel = await prisma.channel.findUnique({
+          where: { id: channelId },
+          select: { id: true },
+        });
+        if (!channel) return;
+        void socket.join(`channel:${channelId}`);
+      } catch {
+        // Swallow transient DB errors — the client can retry.
+      }
     });
 
     // Structured disconnect log so operators can correlate transient

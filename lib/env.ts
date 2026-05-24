@@ -87,6 +87,11 @@ const envSchema = z.object({
     .positive('AI_AGENT_INTERVAL_MS must be > 0')
     .default(30_000),
 
+  WORKSPACE_ID: z
+    .string()
+    .min(1)
+    .default('ws_default'),
+
   NODE_ENV: z
     .enum(['development', 'production', 'test'])
     .default('development'),

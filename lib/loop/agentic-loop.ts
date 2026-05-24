@@ -54,6 +54,7 @@
  */
 
 import { AIRuntime } from '@/lib/ai/runtime';
+import { BUDGET_EXCEEDED_CODE, budget } from '@/lib/ai/budget';
 import { agenticEmitter } from '@/lib/loop/emitter';
 import prisma from '@/lib/prisma';
 import type { AppIOServer } from '@/lib/realtime/io';
@@ -203,7 +204,15 @@ async function runForAI(aiUserId: string): Promise<void> {
     return;
   }
 
-  // 3. Run the cycle under the inFlight guard. The set membership is
+  // 3. Budget gate: skip this cycle when the daily AI budget has already
+  //    been exceeded so we don't emit a short-lived `ai:thinking { true }`
+  //    that is immediately cancelled inside `runCycle`. The runtime still
+  //    performs its own per-call budget check as a mid-cycle safety net.
+  if (budget.getStats().todayUSD >= budget.getStats().limitUSD) {
+    return;
+  }
+
+  // 4. Run the cycle under the inFlight guard. The set membership is
   //    flipped synchronously around the awaited call so the guard
   //    holds across every async boundary inside `runCycle`.
   inFlight.add(aiUserId);
