@@ -99,12 +99,17 @@ async function bootstrap(): Promise<void> {
   try {
     await app.prepare();
 
-    const httpServer = createServer((req, res) => {
-      // Delegate every HTTP request to Next.js. URL parsing is handled
-      // internally by `getRequestHandler()` in Next 14, so we forward the
-      // raw req/res unchanged.
-      void handler(req, res);
-    });
+    // Create the HTTP server WITHOUT a request listener. Socket.io
+    // attaches its own `request` listener when we call
+    // `createIOServer(httpServer)` below; we then add a *second*
+    // listener that forwards everything except `/socket.io/...` to
+    // Next.js. Order matters: with multiple listeners on the same
+    // event, every listener fires for every event, so socket.io's
+    // listener handles its own paths first while ours filters and
+    // forwards the rest to Next. Doing it the other way around
+    // (one combined callback handed to `createServer`) makes
+    // socket.io replace our callback wholesale and breaks Next.
+    const httpServer = createServer();
 
     // Attach Socket.io to the same HTTP server. The IO instance is held by
     // the singleton in `lib/realtime/io.ts` and read via `getIO()` from
@@ -114,6 +119,19 @@ async function bootstrap(): Promise<void> {
     // real NextAuth session check, so unauthenticated connections are
     // rejected here without any additional setup at this call site.
     const io = createIOServer(httpServer);
+
+    // Now register the Next.js dispatcher. Socket.io's listener is
+    // already on the `request` event; this one fires alongside it.
+    // We skip socket.io paths to avoid Next responding 404 to
+    // `/socket.io/...` polls (which would race with socket.io's own
+    // 200 response and corrupt the engine.io transport). Everything
+    // else flows into the App Router as usual.
+    httpServer.on('request', (req, res) => {
+      if (req.url && req.url.startsWith('/socket.io/')) {
+        return;
+      }
+      void handler(req, res);
+    });
 
     // Boot the Agentic Loop *after* the Socket.io middleware is wired
     // (so the very first cycle's realtime broadcasts flow over an
