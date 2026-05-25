@@ -57,6 +57,12 @@ vi.mock('@/lib/prisma', () => ({
     },
     message: { findMany: vi.fn(async () => []) },
     task: { findMany: vi.fn(async () => []) },
+    // `runtime.buildInitialContext` reads channels alongside messages
+    // and tasks so the assistant can pick a real `channelId` for
+    // `send_channel_message`. Stub returns an empty list — the
+    // assertions in this file only check the system prompt + round-cap
+    // contract, not the channel digest content.
+    channel: { findMany: vi.fn(async () => []) },
   },
 }));
 

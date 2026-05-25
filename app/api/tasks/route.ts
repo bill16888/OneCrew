@@ -29,6 +29,7 @@
 import type { Task } from '@prisma/client';
 import { getServerSession } from 'next-auth';
 import { NextResponse } from 'next/server';
+import { z } from 'zod';
 
 import { authOptions } from '@/lib/auth/options';
 import { TaskService } from '@/lib/services/task.service';
@@ -74,6 +75,90 @@ export async function GET(): Promise<
   } catch {
     return NextResponse.json<ApiErrorResponse>(
       { error: 'Failed to load tasks.' },
+      { status: 500 },
+    );
+  }
+}
+
+/**
+ * Zod schema for `POST /api/tasks` request bodies.
+ *
+ * Mirrors the limits we apply to the AI tool surface in
+ * `TOOL_ZOD_SCHEMAS.create_task` so a human-driven submission cannot
+ * write a row the AI couldn't produce on its own. `assigneeId` stays
+ * optional — the kanban "New task" form lets users leave it unassigned.
+ */
+const CREATE_TASK_BODY = z.object({
+  title: z.string().min(1).max(200),
+  description: z.string().max(2000).optional(),
+  assigneeId: z.string().min(1).optional(),
+});
+
+/**
+ * Handle `POST /api/tasks`. Lets a signed-in *human* user create a task
+ * directly from the UI (the Kanban "New task" button). The AI runtime
+ * still uses its own dispatcher path via the `create_task` tool — this
+ * route exists strictly for the human-driven flow.
+ *
+ * Contract:
+ *   - Method: `POST`
+ *   - Auth: requires a valid NextAuth session.
+ *   - Body: `{ title: string, description?: string, assigneeId?: string }`
+ *   - Responses:
+ *     - `201 Task` on success.
+ *     - `400 { error }` when the JSON body is malformed or fails Zod.
+ *     - `401 { error }` when the request has no NextAuth session.
+ *     - `500 { error }` for unexpected persistence failures.
+ *
+ * The realtime broadcast (`task:updated`) is emitted by
+ * `TaskService.create` after the row commits, so every connected client
+ * sees the new task automatically — no extra plumbing needed here.
+ */
+export async function POST(
+  request: Request,
+): Promise<NextResponse<Task | ApiErrorResponse>> {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id) {
+    return NextResponse.json<ApiErrorResponse>(
+      { error: 'Unauthorized' },
+      { status: 401 },
+    );
+  }
+
+  // Parse + validate the JSON body. Treat any parse / schema failure as
+  // a 400 so the client can surface a friendly error message in the
+  // form. We don't expose Zod's full error tree on the wire — a single
+  // human-readable line keeps the API contract narrow.
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json<ApiErrorResponse>(
+      { error: 'Invalid JSON body.' },
+      { status: 400 },
+    );
+  }
+  const parsed = CREATE_TASK_BODY.safeParse(body);
+  if (!parsed.success) {
+    const first = parsed.error.issues[0];
+    const path = first?.path.join('.') || '(body)';
+    return NextResponse.json<ApiErrorResponse>(
+      { error: `Invalid ${path}: ${first?.message ?? 'unknown error'}` },
+      { status: 400 },
+    );
+  }
+
+  try {
+    const task = await TaskService.create({
+      title: parsed.data.title,
+      description: parsed.data.description,
+      creatorId: session.user.id,
+      assigneeId: parsed.data.assigneeId,
+    });
+    return NextResponse.json<Task>(task, { status: 201 });
+  } catch {
+    return NextResponse.json<ApiErrorResponse>(
+      { error: 'Failed to create task.' },
       { status: 500 },
     );
   }
