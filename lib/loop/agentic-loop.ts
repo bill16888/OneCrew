@@ -364,12 +364,27 @@ function start(io: AppIOServer): void {
   // without affecting other subscribers of the process-global emitter
   // (notably the AI Runtime's `reject` listener wired in task 9.x).
   wakeupListener = (aiUserId: string) => {
+    // Diagnostic: log every wakeup the loop receives so we can
+    // correlate with `mention_wakeup_emit` log lines on the producer
+    // side (`MessageService.create`) and confirm the singleton is
+    // actually shared.
+    // eslint-disable-next-line no-console
+    console.info(
+      JSON.stringify({ event: 'agentic_wakeup_received', aiUserId }),
+    );
     // Fire-and-forget: `runForAI` never throws, so we don't need to
     // attach an extra `.catch`. The leading `void` makes the discard
     // explicit for both readers and lint rules.
     void runForAI(aiUserId);
   };
   agenticEmitter.on('wakeup', wakeupListener);
+  // eslint-disable-next-line no-console
+  console.info(
+    JSON.stringify({
+      event: 'agentic_wakeup_listener_attached',
+      listenerCount: agenticEmitter.listenerCount('wakeup'),
+    }),
+  );
 }
 
 /**

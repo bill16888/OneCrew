@@ -269,6 +269,18 @@ async function wakeMentionedAIs(content: string): Promise<void> {
 
   for (const ai of aiUsers) {
     if (mentions.has(ai.name.trim().toLowerCase())) {
+      // Diagnostic: emitter singletons can drift when imported from
+      // different bundle realms (next build worker vs custom server),
+      // so log every emit so we can correlate with the listener side.
+      // eslint-disable-next-line no-console
+      console.info(
+        JSON.stringify({
+          event: 'mention_wakeup_emit',
+          aiUserId: ai.id,
+          aiName: ai.name,
+          listenerCount: agenticEmitter.listenerCount('wakeup'),
+        }),
+      );
       agenticEmitter.emit('wakeup', ai.id);
     }
   }
