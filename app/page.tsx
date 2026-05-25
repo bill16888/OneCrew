@@ -1,23 +1,21 @@
+import { redirect } from 'next/navigation';
+
 /**
- * Placeholder landing page for the workspace skeleton.
+ * Workspace landing page.
  *
- * The real workspace shell (sidebar + channels + kanban) is wired up in
- * task 2.x. For now we just confirm the dark-theme tokens render.
+ * The MVP exposes a single workspace, so loading `/` directly drops the
+ * user into the seeded `#general` channel — that is the only screen with
+ * a fully wired sidebar + composer + AI teammate panel + approval banner.
+ * Without this redirect, `/` rendered a "skeleton scaffolded" placeholder
+ * outside the workspace layout, so newly-signed-in users saw a sidebar-
+ * less splash and had to type a channel URL by hand to reach anything
+ * useful.
+ *
+ * `redirect()` issues an HTTP 307 from the server, so the browser never
+ * paints the placeholder. We send the user to the canonical seeded
+ * channel id (`chan_general`) rather than just `general` to match the
+ * channel rows actually present in the database (Requirements 1.6).
  */
-export default function HomePage() {
-  return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-6 px-6 py-16">
-      <span className="ai-badge">AI</span>
-      <h1 className="text-3xl font-semibold tracking-tight">AI-Native Team Workspace</h1>
-      <p className="max-w-md text-center text-sm text-muted-foreground">
-        Skeleton scaffolded. Channels, kanban, approvals, and the agentic loop are
-        implemented in subsequent tasks.
-      </p>
-      <div className="flex items-center gap-3 text-xs text-muted-foreground">
-        <span className="inline-block h-3 w-3 rounded-sm bg-primary" /> Indigo #6366F1
-        <span className="inline-block h-3 w-3 rounded-sm bg-ai" /> AI #A855F7
-        <span className="inline-block h-3 w-8 rounded-sm bg-ai-gradient" /> AI gradient
-      </div>
-    </main>
-  );
+export default function HomePage(): never {
+  redirect('/channels/chan_general');
 }
