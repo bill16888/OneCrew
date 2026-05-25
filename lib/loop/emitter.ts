@@ -46,7 +46,6 @@
  * ```
  */
 
-import { env } from '@/lib/env';
 import { EventEmitter } from 'node:events';
 
 /**
@@ -173,13 +172,22 @@ function createAgenticEmitter(): AgenticEmitter {
 /**
  * Process-wide agentic event emitter.
  *
- * - In production: created once per process at module load.
- * - In development: cached on `globalThis.__agenticEmitter__` so
- *   Next.js HMR reloads do not orphan previously-registered listeners.
+ * The cache is attached to `globalThis.__agenticEmitter__` regardless
+ * of NODE_ENV. We cache in production too because Next.js's standalone
+ * server bundler can evaluate this module from two different entry
+ * points within the same Node process — once as part of the custom
+ * `server.ts` (where the Agentic Loop attaches its `wakeup` listener)
+ * and again from inside the App Router request handler (where
+ * `MessageService.create` emits `wakeup` after a human @-mention).
+ * Both bundle realms construct their own `EventEmitter` if we do not
+ * pin one to `globalThis`, which manifests as a `listenerCount=0` on
+ * emit even though `agentic_wakeup_listener_attached listenerCount=1`
+ * was logged seconds earlier on the loop side.
+ *
+ * The development case is unchanged: HMR also reuses this cache so
+ * previously-registered listeners survive module reloads.
  */
 export const agenticEmitter: AgenticEmitter =
   globalForEmitter.__agenticEmitter__ ?? createAgenticEmitter();
 
-if (env.NODE_ENV !== 'production') {
-  globalForEmitter.__agenticEmitter__ = agenticEmitter;
-}
+globalForEmitter.__agenticEmitter__ = agenticEmitter;
