@@ -157,6 +157,15 @@ export function getClientSocket(): AppClientSocket {
     reconnectionAttempts: Number.POSITIVE_INFINITY,
     reconnectionDelay: 500,
     autoConnect: true,
+    // Send cookies on every polling request. socket.io-client does
+    // NOT include credentials by default; without this, the
+    // long-polling handshake reaches our server stripped of the
+    // NextAuth session cookie and the auth middleware rejects with
+    // `connect_error { message: 'unauthenticated' }`. Setting this
+    // flips XHR's `withCredentials` flag so the browser attaches the
+    // same-origin session cookie that the App Router uses for HTTP
+    // routes.
+    withCredentials: true,
     // Pin to long-polling. We tried `['polling', 'websocket']` first;
     // polling worked but socket.io's automatic upgrade to WebSocket
     // consistently fails on Railway's edge proxy with
