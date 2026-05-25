@@ -244,9 +244,28 @@ export async function create(input: CreateMessageInput): Promise<Message> {
 const MENTION_REGEX = /@([\w\u4e00-\u9fff]+)/g;
 
 /**
+ * Common Chinese transliterations of each AI colleague's English
+ * name. The browser-side translator (and humans) routinely render
+ * `Ada` → `艾达 / 阿达` and `Hopper` → `霍珀 / 霍普 / 哈珀 / 哈柏`,
+ * so a literal `name` comparison would miss those. We expand the
+ * mention set with this table before matching against the database.
+ *
+ * Keys are lowercased English names that match `User.name` in the
+ * seed; values are the alternate forms the wakeup matcher should
+ * recognise. Lower-case the values too so the comparison stays
+ * case-insensitive (CJK is unaffected by case-folding, but keeping
+ * the codepath uniform avoids subtle Unicode bugs later).
+ */
+const MENTION_ALIASES: Record<string, readonly string[]> = {
+  ada: ['艾达', '阿达', 'ada'],
+  hopper: ['霍珀', '霍普', '哈珀', '哈柏', 'hopper'],
+};
+
+/**
  * Extract every `@`-prefixed name from `content` and emit a `wakeup`
- * for each AI user whose `name` matches. Comparison is
- * case-insensitive and tolerates leading / trailing whitespace.
+ * for each AI user whose `name` (or any alias in
+ * {@link MENTION_ALIASES}) matches. Comparison is case-insensitive
+ * and tolerates leading / trailing whitespace.
  *
  * Lookup happens in a single `prisma.user.findMany` so a message that
  * mentions both `@Ada` and `@Hopper` only costs one query. AI users
@@ -268,7 +287,10 @@ async function wakeMentionedAIs(content: string): Promise<void> {
   });
 
   for (const ai of aiUsers) {
-    if (mentions.has(ai.name.trim().toLowerCase())) {
+    const englishName = ai.name.trim().toLowerCase();
+    const aliases = MENTION_ALIASES[englishName] ?? [englishName];
+    const matched = aliases.some((alias) => mentions.has(alias));
+    if (matched) {
       // Diagnostic: emitter singletons can drift when imported from
       // different bundle realms (next build worker vs custom server),
       // so log every emit so we can correlate with the listener side.
