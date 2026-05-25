@@ -55,6 +55,7 @@
 
 import { AIRuntime } from '@/lib/ai/runtime';
 import { BUDGET_EXCEEDED_CODE, budget } from '@/lib/ai/budget';
+import { env } from '@/lib/env';
 import { agenticEmitter } from '@/lib/loop/emitter';
 import prisma from '@/lib/prisma';
 import type { AppIOServer } from '@/lib/realtime/io';
@@ -321,14 +322,41 @@ function start(io: AppIOServer): void {
     stop();
   }
 
-  // Schedule periodic ticks. `tick()` is async-safe: it catches
-  // everything internally so the timer callback resolves cleanly even
-  // when the body throws. We deliberately ignore the returned Promise
-  // — `setInterval` does not await, and unhandled rejections cannot
-  // happen because `tick` catches its own errors.
-  timer = setInterval(() => {
-    void tick();
-  }, TICK_MS);
+  // Schedule periodic ticks. The periodic tick is *opt-in*: the
+  // default deployment runs without it, so AIs only act when a human
+  // mentions them or when an approval is granted. Operators flip
+  // `AI_AUTO_TICK=true` for demos / live presentations where the
+  // self-driving feel is desirable. The wakeup listener installed
+  // below is wired in either case so @-mentions and approval flows
+  // still work even when the timer is disabled.
+  //
+  // `tick()` is async-safe: it catches everything internally so the
+  // timer callback resolves cleanly even when the body throws. We
+  // deliberately ignore the returned Promise — `setInterval` does not
+  // await, and unhandled rejections cannot happen because `tick`
+  // catches its own errors.
+  if (env.AI_AUTO_TICK) {
+    const intervalMs = env.AI_AGENT_INTERVAL_MS;
+    timer = setInterval(() => {
+      void tick();
+    }, intervalMs);
+    // eslint-disable-next-line no-console
+    console.info(
+      JSON.stringify({
+        event: 'agentic_loop_started',
+        mode: 'auto_tick',
+        intervalMs,
+      }),
+    );
+  } else {
+    // eslint-disable-next-line no-console
+    console.info(
+      JSON.stringify({
+        event: 'agentic_loop_started',
+        mode: 'on_mention_only',
+      }),
+    );
+  }
 
   // Subscribe to immediate wakeup signals. The handler shape mirrors
   // `agenticEmitter`'s typed `wakeup` channel from `lib/loop/emitter.ts`.

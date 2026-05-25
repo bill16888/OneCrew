@@ -21,6 +21,7 @@
 
 import type { Message, Prisma } from '@prisma/client';
 
+import { agenticEmitter } from '@/lib/loop/emitter';
 import prisma from '@/lib/prisma';
 import { EVENTS, type MessageNewPayload } from '@/lib/realtime/events';
 import { getIO } from '@/lib/realtime/io';
@@ -212,7 +213,65 @@ export async function create(input: CreateMessageInput): Promise<Message> {
   // broadcast payload.
   const { user, ...message } = created;
   broadcastMessageNew(message, user.isAI);
+
+  // Wake up any AI colleague this message @-mentions, but only when
+  // the sender is human. AI-to-AI mentions would otherwise spiral
+  // into self-driving loops (e.g. Ada @Hopper triggers a Hopper
+  // cycle that mentions @Ada that triggers an Ada cycle ...). Routing
+  // human-driven mentions through the same `wakeup` channel that the
+  // approval flow uses keeps the scheduling rule narrow: AIs only
+  // act when (a) a human asked them to, or (b) a human approved a
+  // pending request.
+  if (!user.isAI) {
+    void wakeMentionedAIs(message.content).catch(() => {
+      // Mention resolution failures are non-fatal; the message has
+      // already been persisted + broadcast. Worst case: the AI
+      // doesn't get its instant wakeup and runs on the next tick (or
+      // never, when AI_AUTO_TICK is off — the user can re-prompt).
+    });
+  }
+
   return message;
+}
+
+/**
+ * Match every `@<name>` token in a free-form message. The trailing
+ * boundary class accepts ASCII letters, digits, underscore, and CJK
+ * characters so a Chinese name like `@艾达` is still picked up.
+ *
+ * Captures group 1 holds the bare name (no leading `@`).
+ */
+const MENTION_REGEX = /@([\w\u4e00-\u9fff]+)/g;
+
+/**
+ * Extract every `@`-prefixed name from `content` and emit a `wakeup`
+ * for each AI user whose `name` matches. Comparison is
+ * case-insensitive and tolerates leading / trailing whitespace.
+ *
+ * Lookup happens in a single `prisma.user.findMany` so a message that
+ * mentions both `@Ada` and `@Hopper` only costs one query. AI users
+ * whose `name` does not appear in the message are silently ignored.
+ *
+ * Errors are bubbled up so the caller can decide whether to log;
+ * `MessageService.create` swallows them (see comment above).
+ */
+async function wakeMentionedAIs(content: string): Promise<void> {
+  const mentions = new Set<string>();
+  for (const match of content.matchAll(MENTION_REGEX)) {
+    mentions.add(match[1].trim().toLowerCase());
+  }
+  if (mentions.size === 0) return;
+
+  const aiUsers = await prisma.user.findMany({
+    where: { isAI: true },
+    select: { id: true, name: true },
+  });
+
+  for (const ai of aiUsers) {
+    if (mentions.has(ai.name.trim().toLowerCase())) {
+      agenticEmitter.emit('wakeup', ai.id);
+    }
+  }
 }
 
 /**

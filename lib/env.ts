@@ -87,6 +87,33 @@ const envSchema = z.object({
     .positive('AI_AGENT_INTERVAL_MS must be > 0')
     .default(30_000),
 
+  /**
+   * When `true`, the Agentic Loop fires every
+   * `AI_AGENT_INTERVAL_MS` ms and wakes every AI whether or not a
+   * human has spoken to them. Useful for live demos and the spec's
+   * "self-driving teammate" feel.
+   *
+   * When `false` (the default), the periodic tick is suppressed
+   * entirely — the AI only acts when a human directly mentions it
+   * (e.g. "@Ada ..." in a channel) or when an approval transitions
+   * `PENDING → APPROVED`. This stops the AIs from chatting with
+   * themselves at $0.10/min when the workspace is idle, which is
+   * what you want during normal use.
+   *
+   * Coerced from the string `process.env` value via
+   * `z.string().transform(...)` so any of the common truthy spellings
+   * (`true`, `1`, `on`, `yes`) flips the flag without forcing the
+   * operator to remember exact casing.
+   */
+  AI_AUTO_TICK: z
+    .string()
+    .optional()
+    .transform((v) => {
+      if (v === undefined) return false;
+      const normalised = v.trim().toLowerCase();
+      return ['1', 'true', 'on', 'yes'].includes(normalised);
+    }),
+
   WORKSPACE_ID: z
     .string()
     .min(1)
