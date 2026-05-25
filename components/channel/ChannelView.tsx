@@ -112,7 +112,43 @@ export function ChannelView({
     const socket = getClientSocket();
     subscribeToChannel(channelId);
 
+    // Diagnostic log so issues like "messages stop arriving after a
+    // transport hiccup" can be spotted in Console without having to
+    // read network traces. Logs are emitted at info level and kept
+    // small so they don't drown out app output.
+    /* eslint-disable no-console */
+    const onConnect = (): void => {
+      console.info('[socket] connected; joining room', { channelId });
+      // Re-emit the subscribe on every (re)connect so the server's
+      // per-socket room membership survives transport drops.
+      subscribeToChannel(channelId);
+    };
+    const onDisconnect = (reason: string): void => {
+      console.info('[socket] disconnected', { reason });
+    };
+    const onConnectError = (err: Error): void => {
+      console.warn('[socket] connect_error', { message: err.message });
+    };
+    socket.on('connect', onConnect);
+    socket.on('disconnect', onDisconnect);
+    socket.on('connect_error', onConnectError);
+
+    if (socket.connected) {
+      // We mounted after the singleton had already connected on a
+      // previous page (e.g. came in from another channel). Surface
+      // a marker line so Console reads consistently in both flows.
+      console.info('[socket] already connected on mount', { channelId });
+    }
+    /* eslint-enable no-console */
+
     const handleMessageNew = (payload: MessageNewPayload): void => {
+      // eslint-disable-next-line no-console
+      console.info('[socket] message:new received', {
+        id: payload.id,
+        channelId: payload.channelId,
+        fromAI: payload.fromAI,
+      });
+
       // Defensive filter: the server only emits to the joined room,
       // but a stale subscription could still receive a different
       // channel's payload during a navigation transition.
@@ -142,6 +178,9 @@ export function ChannelView({
 
     return () => {
       socket.off(EVENTS.MessageNew, handleMessageNew);
+      socket.off('connect', onConnect);
+      socket.off('disconnect', onDisconnect);
+      socket.off('connect_error', onConnectError);
     };
   }, [channelId, userDirectory]);
 
