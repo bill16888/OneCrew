@@ -64,7 +64,7 @@ import {
   type AnthropicLikeToolResultBlock as ToolResultBlockParam,
   type AnthropicLikeToolUseBlock as ToolUseBlock,
 } from './openai-bridge';
-import { type AIRoleName, SYSTEM_PROMPTS } from './prompts';
+import { SYSTEM_PROMPTS } from './prompts';
 import { dispatchTool, TOOL_DEFINITIONS, type ToolCall } from './tools';
 
 // ---------------------------------------------------------------------------
@@ -136,6 +136,41 @@ const RECENT_MESSAGE_LIMIT = 50;
 function resolveWorkspaceId(): string {
   const fromEnv = process.env.WORKSPACE_ID;
   return fromEnv && fromEnv.length > 0 ? fromEnv : DEFAULT_WORKSPACE_ID;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  if (
+    value !== null &&
+    value !== undefined &&
+    typeof value === 'object' &&
+    !Array.isArray(value)
+  ) {
+    return value as Record<string, unknown>;
+  }
+  return {};
+}
+
+function getCustomSystemPrompt(aiSettings: unknown): string | null {
+  const candidate = asRecord(aiSettings).systemPrompt;
+  if (typeof candidate !== 'string') return null;
+  const trimmed = candidate.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function getRoleSystemPrompt(aiRole: string | null): string | null {
+  if (aiRole === 'Ada' || aiRole === 'Hopper') {
+    return SYSTEM_PROMPTS[aiRole];
+  }
+  return null;
+}
+
+function buildGenericSystemPrompt(aiName: string): string {
+  return [
+    `You are ${aiName}, an AI teammate in AI-Native Team Workspace.`,
+    'Collaborate with human teammates through channels, tasks, and approvals.',
+    'Always write user-facing messages in Simplified Chinese.',
+    'For production changes, external communication, destructive actions, or other high-risk work, call request_approval before taking action.',
+  ].join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -373,17 +408,17 @@ function isToolUseBlock(block: { type: string }): block is ToolUseBlock {
  * Validates: Requirements 4.2, 5.9, 7.3, 7.4, 7.6, 7.7, 10.5.
  *
  * @param aiUserId `User.id` of the AI colleague to run. The user MUST
- *   have `isAI === true` and a valid `aiRole`.
+ *   have `isAI === true`.
  * @returns A {@link RunCycleResult} describing how the cycle ended.
  * @throws  When `aiUserId` does not resolve to a user, or that user is
- *   not an AI with a known `aiRole`. These configuration errors are
+ *   not an AI. These configuration errors are
  *   surfaced (rather than swallowed) so the Agentic Loop can log them
  *   distinctly from in-cycle failures.
  */
 export async function runCycle(aiUserId: string): Promise<RunCycleResult> {
   const start = Date.now();
 
-  // 1. Resolve the AI user and validate its role. We do this *before*
+  // 1. Resolve the AI user and validate it. We do this *before*
   //    emitting `ai:thinking { true }` so a misconfigured user does
   //    not leave a lingering "thinking" indicator in the UI.
   const ai = await prisma.user.findUniqueOrThrow({
@@ -395,17 +430,12 @@ export async function runCycle(aiUserId: string): Promise<RunCycleResult> {
       `runCycle called for non-AI user ${aiUserId} (User.isAI === false)`,
     );
   }
-  const aiRole = ai.aiRole;
-  if (aiRole !== 'Ada' && aiRole !== 'Hopper') {
-    throw new Error(
-      `runCycle: AI user ${aiUserId} has unsupported aiRole ${String(aiRole)}; expected 'Ada' or 'Hopper'`,
-    );
-  }
-  const role: AIRoleName = aiRole;
-
   const workspaceId = resolveWorkspaceId();
   const tools = asAnthropicTools();
-  const system = SYSTEM_PROMPTS[role];
+  const system =
+    getCustomSystemPrompt(ai.aiSettings) ??
+    getRoleSystemPrompt(ai.aiRole) ??
+    buildGenericSystemPrompt(ai.name);
 
   let rounds = 0;
   let finishReason: FinishReason | null = null;

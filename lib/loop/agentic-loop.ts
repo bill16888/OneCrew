@@ -256,7 +256,7 @@ async function runForAI(aiUserId: string): Promise<void> {
 async function tick(): Promise<void> {
   try {
     const ais = await prisma.user.findMany({
-      where: { isAI: true },
+      where: { isAI: true, aiStatus: 'active' },
       select: { id: true },
     });
 

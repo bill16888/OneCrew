@@ -29,6 +29,8 @@ model User {
   avatarUrl     String?
   isAI          Boolean    @default(false)
   aiRole        String? // 'Ada' | 'Hopper'
+  aiSettings    Json?
+  aiStatus      String?    @default("active")
   workspaceId   String
   workspace     Workspace  @relation(fields: [workspaceId], references: [id])
   messages      Message[]
@@ -39,6 +41,7 @@ model User {
 
   @@index([workspaceId])
   @@index([isAI])
+  @@index([isAI, aiStatus])
 }
 
 model Channel {

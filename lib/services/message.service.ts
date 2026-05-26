@@ -282,7 +282,7 @@ async function wakeMentionedAIs(content: string): Promise<void> {
   if (mentions.size === 0) return;
 
   const aiUsers = await prisma.user.findMany({
-    where: { isAI: true },
+    where: { isAI: true, aiStatus: 'active' },
     select: { id: true, name: true },
   });
 

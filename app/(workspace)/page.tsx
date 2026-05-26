@@ -43,9 +43,9 @@ export default function WorkspaceHomePage() {
           Welcome back
         </h1>
         <p className="max-w-xl text-sm text-muted-foreground">
-          Channels, the kanban board, and your AI teammates Ada and Hopper are
-          all on the left. Pick a channel to jump back into a thread, or open
-          the board to see what&rsquo;s in flight.
+          Channels, the kanban board, and your AI teammates are all on the
+          left. Pick a channel to jump back into a thread, or open the board to
+          see what&rsquo;s in flight.
         </p>
       </header>
 
