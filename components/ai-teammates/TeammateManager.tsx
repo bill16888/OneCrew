@@ -116,8 +116,8 @@ function toFormState(ai: AIColleague): FormState {
 
 function roleLabel(ai: AIColleague): string {
   const status = ai.aiStatus ?? 'active';
-  if (status !== 'active') return 'Inactive';
-  return ai.aiRole ?? 'Custom';
+  if (status !== 'active') return '已停用';
+  return ai.aiRole ?? '自定义';
 }
 
 export function TeammateManager(): JSX.Element {
@@ -159,7 +159,7 @@ export function TeammateManager(): JSX.Element {
       const data = (await response.json()) as AIColleague[];
       setTeammates(data.length > 0 ? data : []);
     } catch {
-      setError('Failed to load AI teammates.');
+      setError('加载 AI 同事列表失败');
     } finally {
       setLoading(false);
     }
@@ -285,13 +285,13 @@ export function TeammateManager(): JSX.Element {
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-2 px-2">
         <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">
-          AI Teammates
+          AI 同事
         </span>
         <button
           type="button"
           onClick={openCreateDialog}
-          title="Create AI teammate"
-          aria-label="Create AI teammate"
+          title="创建 AI 同事"
+          aria-label="创建 AI 同事"
           className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-surface-raised hover:text-foreground"
         >
           <UserPlus className="h-4 w-4" aria-hidden />
@@ -348,8 +348,8 @@ export function TeammateManager(): JSX.Element {
                 <button
                   type="button"
                   onClick={() => openEditDialog(ai)}
-                  title="Edit"
-                  aria-label={`Edit ${ai.name}`}
+                  title="编辑"
+                  aria-label={`编辑 ${ai.name}`}
                   className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-surface-raised hover:text-foreground"
                 >
                   <Pencil className="h-3.5 w-3.5" aria-hidden />
@@ -360,8 +360,8 @@ export function TeammateManager(): JSX.Element {
                   onClick={() =>
                     void setAIStatus(ai, isInactive ? 'active' : 'inactive')
                   }
-                  title={isInactive ? 'Activate' : 'Deactivate'}
-                  aria-label={`${isInactive ? 'Activate' : 'Deactivate'} ${ai.name}`}
+                  title={isInactive ? '启用' : '停用'}
+                  aria-label={`${isInactive ? '启用' : '停用'} ${ai.name}`}
                   className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-surface-raised hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isMutating ? (
@@ -409,11 +409,12 @@ export function TeammateManager(): JSX.Element {
               <div className="min-w-0 flex-1">
                 <DialogPrimitive.Title className="text-base font-semibold">
                   {dialogMode === 'create'
-                    ? 'Create AI teammate'
-                    : 'Edit AI teammate'}
+                    ? '创建 AI 同事'
+                    : '编辑 AI 同事'}
                 </DialogPrimitive.Title>
                 <DialogPrimitive.Description className="sr-only">
                   Manage AI teammate settings.
+                </DialogPrimitive.Description>
                 </DialogPrimitive.Description>
               </div>
               <DialogPrimitive.Close
@@ -428,7 +429,7 @@ export function TeammateManager(): JSX.Element {
             <form onSubmit={submitForm} className="flex flex-col gap-4">
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="flex flex-col gap-1.5 text-xs font-medium text-muted-foreground">
-                  Name
+                  名称
                   <input
                     value={form.name}
                     onChange={(event) => updateForm('name', event.target.value)}
@@ -437,7 +438,7 @@ export function TeammateManager(): JSX.Element {
                   />
                 </label>
                 <label className="flex flex-col gap-1.5 text-xs font-medium text-muted-foreground">
-                  Email
+                  邮箱
                   <input
                     type="email"
                     value={form.email}
@@ -450,7 +451,7 @@ export function TeammateManager(): JSX.Element {
               </div>
 
               <label className="flex flex-col gap-1.5 text-xs font-medium text-muted-foreground">
-                System prompt
+                系统提示词
                 <textarea
                   value={form.systemPrompt}
                   onChange={(event) =>
@@ -490,7 +491,9 @@ export function TeammateManager(): JSX.Element {
                     className="inline-flex items-center justify-center gap-2 rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-foreground hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <X className="h-4 w-4" aria-hidden />
-                    Cancel
+                    取消
+                  </button>
+                </DialogPrimitive.Close>
                   </button>
                 </DialogPrimitive.Close>
                 <button
@@ -503,7 +506,7 @@ export function TeammateManager(): JSX.Element {
                   ) : (
                     <Check className="h-4 w-4" aria-hidden />
                   )}
-                  Save
+                  保存
                 </button>
               </div>
             </form>

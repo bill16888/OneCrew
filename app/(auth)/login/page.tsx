@@ -117,7 +117,7 @@ function LoginForm(): ReactElement {
           htmlFor="email"
           className="block text-sm font-medium text-foreground"
         >
-          Email
+          邮箱
         </label>
         <input
           id="email"
@@ -138,7 +138,7 @@ function LoginForm(): ReactElement {
           htmlFor="password"
           className="block text-sm font-medium text-foreground"
         >
-          Password
+          密码
         </label>
         <input
           id="password"
@@ -175,7 +175,7 @@ function LoginForm(): ReactElement {
         aria-busy={isSubmitting}
         className="w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-600 focus:outline-none focus:ring-2 focus:ring-primary/60 disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {isSubmitting ? 'Signing in…' : 'Sign in'}
+        {isSubmitting ? '登录中…' : '登录'}
       </button>
     </form>
   );
@@ -219,7 +219,7 @@ export default function LoginPage(): ReactElement {
             AI-Native Team Workspace
           </h1>
           <p className="text-sm text-muted-foreground">
-            Sign in to your workspace.
+            登录到你的工作区
           </p>
         </header>
 

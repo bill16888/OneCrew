@@ -45,7 +45,7 @@ export interface MessageComposerProps {
 export function MessageComposer({
   channelId,
   onSubmit,
-  placeholder = 'Message #channel',
+  placeholder = '输入消息...',
 }: MessageComposerProps): JSX.Element {
   const [content, setContent] = useState<string>('');
 

@@ -40,18 +40,17 @@ export default function WorkspaceHomePage() {
           </span>
         </div>
         <h1 className="text-3xl font-semibold tracking-tight text-foreground">
-          Welcome back
+          欢迎回来
         </h1>
         <p className="max-w-xl text-sm text-muted-foreground">
-          Channels, the kanban board, and your AI teammates are all on the
-          left. Pick a channel to jump back into a thread, or open the board to
-          see what&rsquo;s in flight.
+          频道、看板和 AI 同事都在左侧。选择一个频道继续对话，
+          或者打开看板查看当前任务进展。
         </p>
       </header>
 
       <section className="flex flex-col gap-3">
         <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70">
-          Channels
+          频道
         </h2>
         <ul className="grid gap-2 sm:grid-cols-2">
           {FEATURED_CHANNELS.map((channel) => (

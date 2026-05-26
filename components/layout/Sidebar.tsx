@@ -96,7 +96,7 @@ export function Sidebar() {
         </button>
 
         <nav className="flex flex-1 flex-col gap-6 overflow-y-auto">
-          <SidebarSection title="Channels">
+          <SidebarSection title="频道">
             <ul className="flex flex-col gap-0.5">
               {channels.map((channel) => (
                 <li key={channel.id}>
@@ -123,7 +123,7 @@ export function Sidebar() {
 
           <TeammateManager />
 
-          <SidebarSection title="Tasks">
+          <SidebarSection title="任务">
             <Link
               href="/board"
               onClick={closeMobileSidebar}
@@ -135,7 +135,7 @@ export function Sidebar() {
               )}
             >
               <ListChecks className="h-4 w-4 shrink-0 opacity-70" aria-hidden />
-              <span className="truncate">Kanban board</span>
+              <span className="truncate">看板</span>
             </Link>
           </SidebarSection>
         </nav>
@@ -157,7 +157,7 @@ function WorkspaceHeader({ onNavigate }: { onNavigate?: () => void }) {
       >
         <Sparkles className="h-4 w-4 text-white" />
       </span>
-      <span className="truncate leading-tight">AI-Native Team Workspace</span>
+      <span className="truncate leading-tight">AI 协作工作区</span>
     </Link>
   );
 }

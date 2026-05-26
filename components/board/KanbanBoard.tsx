@@ -33,10 +33,10 @@ interface KanbanColumn {
  * task 2.7 assert this exact configuration.
  */
 export const KANBAN_COLUMNS: readonly KanbanColumn[] = [
-  { status: 'Backlog', label: 'Backlog' },
-  { status: 'InProgress', label: 'In Progress' },
-  { status: 'InReview', label: 'In Review' },
-  { status: 'Done', label: 'Done' },
+  { status: 'Backlog', label: '待办' },
+  { status: 'InProgress', label: '进行中' },
+  { status: 'InReview', label: '审查中' },
+  { status: 'Done', label: '已完成' },
 ] as const;
 
 export interface KanbanBoardProps {

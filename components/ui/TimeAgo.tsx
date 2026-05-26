@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
+import { zhCN } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 
 /**
@@ -65,7 +66,7 @@ export function TimeAgo({ date, className, intervalMs = 60_000 }: TimeAgoProps) 
 
   const iso = resolved.toISOString();
   const label = mounted
-    ? formatDistanceToNow(resolved, { addSuffix: true })
+    ? formatDistanceToNow(resolved, { addSuffix: true, locale: zhCN })
     : '';
 
   return (

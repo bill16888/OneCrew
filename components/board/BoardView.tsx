@@ -137,13 +137,13 @@ export function BoardView({
       <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="flex flex-col gap-1">
           <span className="text-xs uppercase tracking-wider text-muted-foreground">
-            Tasks
+            任务
           </span>
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">
             看板
           </h1>
           <p className="text-sm text-muted-foreground">
-            Backlog · In Progress · In Review · Done。AI 创建/接手的任务带紫色 AI 徽章。
+            待办 · 进行中 · 审查中 · 已完成。AI 创建/接手的任务带紫色 AI 徽章。
           </p>
         </div>
         <button

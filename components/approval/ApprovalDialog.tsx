@@ -341,7 +341,7 @@ export function ApprovalDialog({
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
                 <span className="text-[11px] font-semibold uppercase text-muted-foreground/80">
-                  Requested action
+                 请求的操作
                 </span>
                 <code className="mt-1 block break-words font-mono text-lg font-semibold text-foreground">
                   {action}
@@ -421,7 +421,7 @@ export function ApprovalDialog({
               )}
             >
               <X className="h-4 w-4" aria-hidden />
-              {submitting === 'reject' ? 'Rejecting…' : 'Reject'}
+              {submitting === 'reject' ? '拒绝中…' : '拒绝'}
             </button>
             <button
               type="button"
@@ -437,7 +437,7 @@ export function ApprovalDialog({
               )}
             >
               <Check className="h-4 w-4" aria-hidden />
-              {submitting === 'approve' ? 'Approving…' : 'Approve'}
+              {submitting === 'approve' ? '批准中…' : '批准'}
             </button>
           </div>
         </DialogPrimitive.Content>
