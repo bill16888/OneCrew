@@ -91,6 +91,101 @@ function extractUserId(
   return null;
 }
 
+function getCookieHeader(req: IncomingMessage): string {
+  const header = req.headers.cookie;
+  if (Array.isArray(header)) return header.join('; ');
+  return header ?? '';
+}
+
+function parseCookieHeader(header: string): Record<string, string> {
+  if (header.length === 0) return {};
+  const cookies: Record<string, string> = {};
+  for (const pair of header.split(';')) {
+    const separatorIndex = pair.indexOf('=');
+    if (separatorIndex <= 0) continue;
+    const name = pair.slice(0, separatorIndex).trim();
+    const rawValue = pair.slice(separatorIndex + 1).trim();
+    if (name.length === 0) continue;
+    try {
+      cookies[name] = decodeURIComponent(rawValue);
+    } catch {
+      cookies[name] = rawValue;
+    }
+  }
+  return cookies;
+}
+
+function readChunkedCookie(
+  cookies: Record<string, string>,
+  cookieName: string,
+): string | null {
+  const chunks = Object.entries(cookies)
+    .filter(([name]) => name === cookieName || name.startsWith(`${cookieName}.`))
+    .sort(([left], [right]) => {
+      const leftSuffix = Number(left.split('.').pop() ?? '0');
+      const rightSuffix = Number(right.split('.').pop() ?? '0');
+      return leftSuffix - rightSuffix;
+    });
+
+  if (chunks.length === 0) return null;
+  return chunks.map(([, value]) => value).join('');
+}
+
+/**
+ * Decode the NextAuth JWT from the raw Socket.io handshake request.
+ *
+ * NextAuth chooses between `next-auth.session-token` and
+ * `__Secure-next-auth.session-token` based on its secure-cookie
+ * heuristic. Behind Railway's HTTPS proxy the HTTP route layer can be
+ * authenticated while this out-of-band Socket.io request is decoded with
+ * the opposite heuristic, producing `connect_error: unauthenticated`.
+ * Trying both explicit modes keeps local HTTP and proxied HTTPS
+ * deployments compatible without exposing the raw JWT to the browser.
+ */
+async function getHandshakeToken(
+  req: IncomingMessage,
+  secret: string,
+): Promise<Awaited<ReturnType<typeof getToken>>> {
+  // Keep the framework path first for tests or adapters that attach a
+  // parsed cookie bag to the request object.
+  const defaultToken = await getToken({ req: req as never, secret });
+  if (defaultToken) return defaultToken;
+
+  const secureToken = await getToken({
+    req: req as never,
+    secret,
+    secureCookie: true,
+  });
+  if (secureToken) return secureToken;
+
+  const insecureToken = await getToken({
+    req: req as never,
+    secret,
+    secureCookie: false,
+  });
+  if (insecureToken) return insecureToken;
+
+  // Socket.io exposes a plain Node IncomingMessage. In NextAuth 4.24,
+  // getToken() does not parse req.headers.cookie for that shape, so we
+  // decode the standard JWT session cookie names directly.
+  const cookies = parseCookieHeader(getCookieHeader(req));
+  for (const cookieName of [
+    '__Secure-next-auth.session-token',
+    'next-auth.session-token',
+  ]) {
+    const rawToken = readChunkedCookie(cookies, cookieName);
+    if (!rawToken) continue;
+    try {
+      const decoded = await decode({ token: rawToken, secret });
+      if (decoded) return decoded;
+    } catch {
+      // Try the next supported cookie name.
+    }
+  }
+
+  return null;
+}
+
 /**
  * Typed Socket.io server alias. Generics are sourced from
  * {@link ./events} so the emit / on surface stays in sync with the four
@@ -198,7 +293,7 @@ export function createIOServer(httpServer: HTTPServer): AppIOServer {
 
       // ── Path 2: cookie fallback (no explicit token forwarded) ────────
       const req = socket.request as IncomingMessage;
-      const token = await getToken({ req: req as never, secret });
+      const token = await getHandshakeToken(req, secret);
       const userId = extractUserId(token);
       if (!userId) {
         return next(new Error('unauthenticated'));
