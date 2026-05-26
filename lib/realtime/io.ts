@@ -200,10 +200,25 @@ export type AppIOServer = SocketIOServer<
 >;
 
 /**
- * Singleton instance set by {@link createIOServer}. Service-layer modules
- * read it via {@link getIO} to broadcast events after a successful DB write.
+ * Process-wide Socket.io singleton. We store it on `globalThis`, not only
+ * in this module's local scope, because Next's App Router can load route
+ * handlers from a bundled module graph while `server.ts` loads this source
+ * module directly via tsx. Both graphs share the same Node process global,
+ * so this keeps broadcasts working from API routes on Railway.
  */
-let ioInstance: AppIOServer | null = null;
+const IO_GLOBAL_KEY = '__aiNativeTeamWorkspaceIO';
+
+type GlobalWithIO = typeof globalThis & {
+  [IO_GLOBAL_KEY]?: AppIOServer | null;
+};
+
+function setGlobalIO(io: AppIOServer): void {
+  (globalThis as GlobalWithIO)[IO_GLOBAL_KEY] = io;
+}
+
+function getGlobalIO(): AppIOServer | null {
+  return (globalThis as GlobalWithIO)[IO_GLOBAL_KEY] ?? null;
+}
 
 /**
  * Build a Socket.io server bound to `httpServer`, install the NextAuth
@@ -355,7 +370,7 @@ export function createIOServer(httpServer: HTTPServer): AppIOServer {
     });
   });
 
-  ioInstance = io;
+  setGlobalIO(io);
   return io;
 }
 
@@ -373,5 +388,5 @@ export function createIOServer(httpServer: HTTPServer): AppIOServer {
  *   been created in the current process.
  */
 export function getIO(): AppIOServer | null {
-  return ioInstance;
+  return getGlobalIO();
 }
