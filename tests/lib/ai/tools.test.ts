@@ -66,6 +66,7 @@ import {
   mockReadProjectDocs,
   mockWebSearch,
 } from '@/lib/ai/tools/mocks';
+import { ApprovalService } from '@/lib/services/approval.service';
 
 const EXPECTED_TOOL_SET: readonly string[] = [
   'create_task',
@@ -157,6 +158,48 @@ describe('Feature: ai-native-team-workspace, Property 13: 工具调度的全函�
       ),
       { numRuns: 100 },
     );
+  });
+});
+
+describe('Feature: ai-native-team-workspace, request_approval enriched payload', () => {
+  it('persists structured approval analysis for human review', async () => {
+    const createApproval = vi.mocked(ApprovalService.create);
+    createApproval.mockClear();
+
+    const result = await dispatchTool(
+      { aiUserId: 'user_ai_ada' },
+      {
+        id: 'approval_tool_1',
+        name: 'request_approval',
+        input: {
+          action: 'create_task',
+          payload: { title: '上线检查复盘' },
+          reason: '需要 PM 确认任务范围和优先级。',
+          analysis: {
+            background: '用户要求创建上线复盘任务。',
+            impactScope: '会在 Kanban Backlog 中新增一张任务卡。',
+            riskLevel: 'medium',
+            alternatives: '先在频道中询问 PM 任务优先级。',
+          },
+        },
+      },
+    );
+
+    expect(result.is_error).toBeUndefined();
+    expect(createApproval).toHaveBeenCalledWith({
+      aiUserId: 'user_ai_ada',
+      action: 'create_task',
+      payload: {
+        title: '上线检查复盘',
+        reason: '需要 PM 确认任务范围和优先级。',
+        approvalAnalysis: {
+          background: '用户要求创建上线复盘任务。',
+          impactScope: '会在 Kanban Backlog 中新增一张任务卡。',
+          riskLevel: 'medium',
+          alternatives: ['先在频道中询问 PM 任务优先级。'],
+        },
+      },
+    });
   });
 });
 

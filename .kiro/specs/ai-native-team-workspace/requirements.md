@@ -186,3 +186,14 @@ AI-Native Team Workspace 是一个面向小型团队的 MVP 协作平台（类 H
 - 全文消息搜索
 - 任务卡片拖拽排序（可作为 nice-to-have，不属于核心验收）
 - 基于 Redis / Bull 的分布式任务队列（MVP 仅使用进程内 `setInterval`）
+
+
+### Requirement 11：@AI 即时触发（Phase 1 优先）
+
+**User Story:** As a 人类成员, I want 在频道里 @AI 名字就能立即唤醒 AI, so that 我不需要等 30 秒巡检。
+
+**Acceptance Criteria:**
+1. WHEN 用户在频道发送包含 "@AI名字" 的消息，THE MessageService SHALL 检测到 mention
+2. WHEN 检测到 mention，THE System SHALL 立即通过 agenticEmitter 发射 wakeup 事件
+3. IF 被 @ 的 AI 是 inactive 状态，THEN System SHALL 忽略
+4. THE 已有 Agentic Loop 的 wakeup 监听 SHALL 处理后续逻辑（无需新增）

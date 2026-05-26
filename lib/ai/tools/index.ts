@@ -72,6 +72,29 @@ const TASK_STATUS_VALUES = [
   'Done',
 ] as const;
 
+const APPROVAL_RISK_LEVEL_VALUES = [
+  'low',
+  'medium',
+  'high',
+] as const;
+
+type ApprovalRiskLevel = (typeof APPROVAL_RISK_LEVEL_VALUES)[number];
+
+interface ApprovalAnalysis {
+  [key: string]: string | string[];
+  background: string;
+  impactScope: string;
+  riskLevel: ApprovalRiskLevel;
+  alternatives: string[];
+}
+
+interface ApprovalAnalysisInput {
+  background?: string;
+  impactScope?: string;
+  riskLevel?: ApprovalRiskLevel;
+  alternatives?: string;
+}
+
 /**
  * The closed set of 6 tools exposed to the model on every `runCycle`.
  *
@@ -125,13 +148,25 @@ export const TOOL_DEFINITIONS = [
   {
     name: 'request_approval',
     description:
-      'Ask a human to approve a high-risk action before continuing. Use this for production changes, external communication, or any irreversible step. The cycle pauses while the approval is PENDING and resumes automatically once it is APPROVED.',
+      'Ask a human to approve a high-risk action before continuing. Use this for production changes, external communication, or any irreversible step. Include structured analysis with background, impactScope, riskLevel, and alternatives so reviewers can decide quickly. The cycle pauses while the approval is PENDING and resumes automatically once it is APPROVED.',
     input_schema: {
       type: 'object',
       properties: {
         action: { type: 'string' },
         payload: { type: 'object' },
         reason: { type: 'string' },
+        analysis: {
+          type: 'object',
+          properties: {
+            background: { type: 'string' },
+            impactScope: { type: 'string' },
+            riskLevel: {
+              type: 'string',
+              enum: ['low', 'medium', 'high'],
+            },
+            alternatives: { type: 'string' },
+          },
+        },
       },
       required: ['action', 'reason'],
     },
@@ -193,6 +228,13 @@ export const TOOL_NAMES: readonly ToolName[] = TOOL_DEFINITIONS.map(
   (t) => t.name,
 );
 
+const approvalAnalysisSchema = z.object({
+  background: z.string().min(1).optional(),
+  impactScope: z.string().min(1).optional(),
+  riskLevel: z.enum(APPROVAL_RISK_LEVEL_VALUES).optional(),
+  alternatives: z.string().min(1).optional(),
+});
+
 // ---------------------------------------------------------------------------
 // Zod input validation
 // ---------------------------------------------------------------------------
@@ -225,6 +267,7 @@ export const TOOL_ZOD_SCHEMAS: Record<ToolName, z.ZodTypeAny> = {
     // Allow any object payload; the Approval row stores it as JSON.
     payload: z.record(z.unknown()).optional(),
     reason: z.string().min(1),
+    analysis: approvalAnalysisSchema.optional(),
   }),
 
   send_channel_message: z.object({
@@ -304,6 +347,102 @@ function buildToolResult(
   };
   if (isError) result.is_error = true;
   return result;
+}
+
+function firstNonBlank(...values: Array<string | undefined>): string | null {
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (trimmed) return trimmed;
+  }
+  return null;
+}
+
+function parseAlternativeList(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(/\r?\n|[;；]/)
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0)
+    .slice(0, 5);
+}
+
+function summarizeApprovalImpact(
+  action: string,
+  payload: Record<string, unknown> | undefined,
+): string {
+  const payloadKeys = Object.keys(payload ?? {}).filter(
+    (key) => key !== 'reason' && key !== 'approvalAnalysis',
+  );
+  if (payloadKeys.length === 0) {
+    return `将执行 ${action}，未提供额外参数。`;
+  }
+  return `将执行 ${action}，影响参数：${payloadKeys.slice(0, 8).join('、')}。`;
+}
+
+function inferApprovalRiskLevel(
+  action: string,
+  payload: Record<string, unknown> | undefined,
+  reason: string,
+): ApprovalRiskLevel {
+  const serializedPayload = (() => {
+    try {
+      return JSON.stringify(payload ?? {});
+    } catch {
+      return '';
+    }
+  })();
+  const text = `${action} ${reason} ${serializedPayload}`.toLowerCase();
+
+  if (
+    /delete|drop|destroy|payment|billing|prod|production|生产|删除|付款|计费/.test(
+      text,
+    )
+  ) {
+    return 'high';
+  }
+  if (
+    /deploy|release|external|email|customer|database|migration|部署|发布|外部|邮件|客户|数据库|迁移/.test(
+      text,
+    )
+  ) {
+    return 'high';
+  }
+  if (/public|notify|send|message|公开|通知|发送/.test(text)) {
+    return 'medium';
+  }
+  return 'medium';
+}
+
+function normalizeApprovalAnalysis({
+  action,
+  payload,
+  reason,
+  analysis,
+}: {
+  action: string;
+  payload: Record<string, unknown> | undefined;
+  reason: string;
+  analysis: ApprovalAnalysisInput | undefined;
+}): ApprovalAnalysis {
+  const alternatives = parseAlternativeList(analysis?.alternatives);
+
+  return {
+    background:
+      firstNonBlank(analysis?.background, reason) ??
+      `需要人工确认 ${action} 是否应该继续执行。`,
+    impactScope:
+      firstNonBlank(analysis?.impactScope) ??
+      summarizeApprovalImpact(action, payload),
+    riskLevel:
+      analysis?.riskLevel ?? inferApprovalRiskLevel(action, payload, reason),
+    alternatives:
+      alternatives.length > 0
+        ? alternatives
+        : [
+            '暂缓执行，等待人工补充更多上下文。',
+            `将 ${action} 拆成更小步骤，先验证低风险部分。`,
+          ],
+  };
 }
 
 /**
@@ -450,15 +589,27 @@ export async function dispatchTool(
         // both happen inside ApprovalService.create; any thrown error
         // (Prisma write, unknown aiUserId) is normalised to an
         // `is_error` tool_result by the outer try/catch (Property 13).
-        const { action, payload, reason } = input as {
+        const {
+          action,
+          payload,
+          reason,
+          analysis: requestedAnalysis,
+        } = input as {
           action: string;
           payload?: Record<string, unknown>;
           reason: string;
+          analysis?: ApprovalAnalysisInput;
         };
+        const analysis = normalizeApprovalAnalysis({
+          action,
+          payload,
+          reason,
+          analysis: requestedAnalysis,
+        });
         await ApprovalService.create({
           aiUserId: ctx.aiUserId,
           action,
-          payload: { ...(payload ?? {}), reason },
+          payload: { ...(payload ?? {}), reason, approvalAnalysis: analysis },
         });
         return buildToolResult(
           call.id,
