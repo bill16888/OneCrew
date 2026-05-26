@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch server.ts",
     "build": "prisma generate && next build",
-    "start": "tsx server.ts",
+    "start": "tsx scripts/railway-start.ts",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test": "vitest --run",

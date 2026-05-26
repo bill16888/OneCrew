@@ -11,9 +11,9 @@
 #     Railway injects `PORT` as the public ingress port; our
 #     `server.ts` already honors `process.env.PORT` and defaults to
 #     3000 in non-Railway environments.
-#   - `healthcheckPath = /api/health` matches the route added in P0
-#     fix #2; Railway will mark the deploy as healthy once it returns
-#     a 200.
+#   - `healthcheckPath = /api/health` is deliberately public in
+#     `middleware.ts`; Railway will mark the deploy as healthy once it
+#     returns a 200.
 #   - `restartPolicyType = ON_FAILURE` keeps a successful exit (rare
 #     for a long-lived server) from being interpreted as a crash loop.
 
@@ -21,14 +21,15 @@
 builder = "DOCKERFILE"
 
 [deploy]
-# We intentionally OMIT `startCommand` so Railway uses the
-# Dockerfile's `CMD` directive instead. The CMD is wrapped in
-# `sh -c "..."` so multi-step commands (`set -e`, echo markers,
-# `npx prisma migrate deploy`, then `exec node_modules/.bin/tsx
-# server.ts`) are evaluated by a real shell. When startCommand is
-# present here, Railway runs it via docker exec with no shell, which
-# silently drops everything after the first `;` / `&&`.
+# Railway's detected start command can fall back to `npm run start`
+# even when Dockerfile mode is selected. Keep the command explicit so
+# deploys always run the env normalisation + Prisma sync wrapper before
+# booting the custom Next/Socket.io server.
+startCommand = "npm run start"
 healthcheckPath = "/api/health"
-healthcheckTimeout = 30
+# Startup runs `prisma db push` before the HTTP server starts, and
+# cold Next.js prepares can exceed the default on Railway's shared
+# builders. Give the container enough time to reach the liveness route.
+healthcheckTimeout = 120
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3

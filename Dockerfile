@@ -111,6 +111,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/components ./components
 COPY --from=builder --chown=nextjs:nodejs /app/store ./store
 COPY --from=builder --chown=nextjs:nodejs /app/hooks ./hooks
 COPY --from=builder --chown=nextjs:nodejs /app/types ./types
+COPY --from=builder --chown=nextjs:nodejs /app/scripts ./scripts
 COPY --from=builder --chown=nextjs:nodejs /app/middleware.ts ./middleware.ts
 COPY --from=builder --chown=nextjs:nodejs /app/next.config.mjs ./next.config.mjs
 COPY --from=builder --chown=nextjs:nodejs /app/next-env.d.ts ./next-env.d.ts
@@ -124,13 +125,10 @@ EXPOSE 3000
 # actually fires when `docker stop` is issued.
 ENTRYPOINT ["/sbin/tini", "--"]
 
-# Apply pending Prisma migrations against the configured DATABASE_URL,
-# then boot the custom server. We invoke `tsx` directly via its
-# `node_modules/.bin` script so the runtime never has to consult `npx`'s
-# prefix-resolution logic; the latter occasionally returns silently when
-# it can't find the package on Alpine, which made an earlier deploy
-# look like the container booted and died with no output. Wrapping in
-# `sh -c` keeps `&&` between the two commands working.
+# Apply pending Prisma schema changes after normalising Railway env vars,
+# then boot the custom server. The wrapper accepts either DATABASE_URL,
+# common Railway/Postgres URL aliases, or PGHOST/PGUSER/PGPASSWORD style
+# variables before it invokes Prisma.
 #
 # We use `prisma db push --accept-data-loss` instead of `prisma migrate
 # deploy` because:
@@ -146,7 +144,6 @@ ENTRYPOINT ["/sbin/tini", "--"]
 #      back to `migrate deploy` and ship a properly-generated
 #      migration directory.
 #
-# `set -e` ensures a non-zero exit from prisma push (or anything
-# before `tsx`) surfaces as a container crash with a clear error,
-# instead of being swallowed.
-CMD ["sh", "-c", "set -e; echo '==> running prisma db push'; npx prisma db push --accept-data-loss --skip-generate; echo '==> starting server.ts via tsx'; exec node_modules/.bin/tsx server.ts"]
+# `set -e` ensures a non-zero exit from the wrapper surfaces as a
+# container crash with a clear error, instead of being swallowed.
+CMD ["sh", "-c", "set -e; exec node_modules/.bin/tsx scripts/railway-start.ts"]

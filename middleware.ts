@@ -2,8 +2,10 @@
  * Protected-route guard for the AI-Native Team Workspace.
  *
  * Behaviour (per task 4.4 / Requirements 1.5):
- * - The `/login` page and all `/api/auth/*` endpoints are publicly
- *   accessible so unauthenticated users can actually sign in.
+ * - The `/login` page, `/api/health` liveness probe, and all
+ *   `/api/auth/*` endpoints are publicly accessible so unauthenticated
+ *   users can actually sign in and platform health checks can receive
+ *   a real `200` instead of an auth redirect.
  * - Next.js static assets (`/_next/static`, `/_next/image`,
  *   `favicon.ico`, and any path that looks like a static file —
  *   anything containing a `.` segment) are also bypassed.
@@ -46,6 +48,7 @@ export default middleware;
  *
  * The negative lookahead skips:
  *   - `login` (the public sign-in page and any nested `/login/...` route),
+ *   - `api/health` (Railway / container liveness probes),
  *   - `api/auth` (NextAuth's own endpoints, including the credentials POST),
  *   - `_next/static` and `_next/image` (Next.js build assets),
  *   - `favicon.ico`,
@@ -57,6 +60,6 @@ export default middleware;
  */
 export const config = {
   matcher: [
-    '/((?!login|api/auth|_next/static|_next/image|favicon.ico|.*\\..*).*)',
+    '/((?!login|api/health|api/auth|_next/static|_next/image|favicon.ico|.*\\..*).*)',
   ],
 };

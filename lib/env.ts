@@ -27,6 +27,61 @@
 
 import { z } from 'zod';
 
+function emptyStringToUndefined(value: unknown): unknown {
+  return typeof value === 'string' && value.trim().length === 0
+    ? undefined
+    : value;
+}
+
+function nonEmptyEnv(
+  source: NodeJS.ProcessEnv,
+  key: string,
+): string | undefined {
+  const value = source[key];
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : undefined;
+}
+
+function encodeConnectionPart(value: string): string {
+  return encodeURIComponent(value);
+}
+
+function resolveDatabaseUrl(source: NodeJS.ProcessEnv): string | undefined {
+  for (const key of [
+    'DATABASE_URL',
+    'POSTGRES_URL',
+    'POSTGRES_PRISMA_URL',
+    'DATABASE_PRIVATE_URL',
+    'DATABASE_PUBLIC_URL',
+  ]) {
+    const value = nonEmptyEnv(source, key);
+    if (value) return value;
+  }
+
+  const host = nonEmptyEnv(source, 'PGHOST');
+  const port = nonEmptyEnv(source, 'PGPORT') ?? '5432';
+  const user = nonEmptyEnv(source, 'PGUSER');
+  const password = nonEmptyEnv(source, 'PGPASSWORD');
+  const database = nonEmptyEnv(source, 'PGDATABASE');
+
+  if (!host || !user || !password || !database) return undefined;
+
+  return `postgresql://${encodeConnectionPart(user)}:${encodeConnectionPart(
+    password,
+  )}@${host}:${port}/${encodeConnectionPart(database)}?schema=public`;
+}
+
+function normaliseProcessEnv(): void {
+  const databaseUrl = resolveDatabaseUrl(process.env);
+  if (databaseUrl) {
+    process.env.DATABASE_URL = databaseUrl;
+  }
+
+  if (process.env.NEXT_PUBLIC_SOCKET_URL?.trim().length === 0) {
+    delete process.env.NEXT_PUBLIC_SOCKET_URL;
+  }
+}
+
 /**
  * Zod schema for the runtime environment.
  *
@@ -43,7 +98,8 @@ import { z } from 'zod';
  *   - `DEEPSEEK_BASE_URL`       — defaults to `https://api.deepseek.com`
  *   - `DEEPSEEK_MODEL`          — defaults to `deepseek-chat`
  *   - `REDIS_URL`               — defaults to `redis://localhost:6379`
- *   - `NEXT_PUBLIC_SOCKET_URL`  — defaults to `http://localhost:3001`
+ *   - `NEXT_PUBLIC_SOCKET_URL`  — optional; browser code falls back to
+ *                                  the current origin when unset
  *   - `AI_DAILY_BUDGET_USD`     — coerced number, defaults to `5`
  *   - `AI_AGENT_INTERVAL_MS`    — coerced number, defaults to `30000`
  *   - `NODE_ENV`                — `'development' | 'production' | 'test'`
@@ -62,19 +118,26 @@ const envSchema = z.object({
   DEEPSEEK_MODEL: z.string().min(1).default('deepseek-chat'),
 
   DATABASE_URL: z
-    .string({ required_error: 'DATABASE_URL is required' })
-    .min(1, 'DATABASE_URL must not be empty'),
+    .preprocess(
+      emptyStringToUndefined,
+      z.string({ required_error: 'DATABASE_URL is required' }),
+    )
+    .pipe(z.string().min(1, 'DATABASE_URL must not be empty')),
 
   NEXTAUTH_SECRET: z
-    .string({ required_error: 'NEXTAUTH_SECRET is required' })
-    .min(32, 'NEXTAUTH_SECRET must be at least 32 characters'),
+    .preprocess(
+      emptyStringToUndefined,
+      z.string({ required_error: 'NEXTAUTH_SECRET is required' }),
+    )
+    .pipe(z.string().min(32, 'NEXTAUTH_SECRET must be at least 32 characters')),
 
-  REDIS_URL: z.string().min(1).default('redis://localhost:6379'),
+  REDIS_URL: z
+    .preprocess(emptyStringToUndefined, z.string().min(1).optional())
+    .default('redis://localhost:6379'),
 
   NEXT_PUBLIC_SOCKET_URL: z
-    .string()
-    .min(1)
-    .default('http://localhost:3001'),
+    .preprocess(emptyStringToUndefined, z.string().min(1).optional())
+    .default(''),
 
   AI_DAILY_BUDGET_USD: z.coerce
     .number()
@@ -115,8 +178,7 @@ const envSchema = z.object({
     }),
 
   WORKSPACE_ID: z
-    .string()
-    .min(1)
+    .preprocess(emptyStringToUndefined, z.string().min(1).optional())
     .default('ws_default'),
 
   NODE_ENV: z
@@ -139,6 +201,8 @@ export type Env = z.infer<typeof envSchema>;
  * pre-validated {@link env} singleton below.
  */
 function loadEnv(): Env {
+  normaliseProcessEnv();
+
   const parsed = envSchema.safeParse(process.env);
   if (parsed.success) {
     return parsed.data;
