@@ -210,3 +210,72 @@ Before opening a PR, confirm:
       §10 above
 - [ ] If you changed UI copy that has a contract test, the test
       moves in lockstep
+
+
+
+## 12. Stacked PR workflow
+
+When a feature naturally splits into multiple PRs that build on each
+other (the 2026-05 audit was 4 stacked PRs: #1 → #2 → #3 → #6), the
+**squash-merge replays as new commits on main**, so each downstream
+PR's old base hash points at history that no longer exists. GitHub
+flags this as "conflicts must be resolved" even when the diffs are
+semantically identical.
+
+### Rules
+
+1. **Merge the stack from the bottom up, one PR at a time.**
+   Do NOT queue multiple stacked PRs and merge them in a batch. Squash-
+   merging the lowest PR rewrites every downstream PR's base.
+2. **After merging the lower PR, immediately rebase the next one on
+   main** — do not let the stack go stale across multiple merges, that
+   compounds the rebase difficulty.
+3. **Use `git rebase --onto origin/main <old-base> <branch>`**, not
+   `git rebase main`. The `--onto` form moves only the commits that
+   the downstream PR actually added; the plain form re-applies every
+   ancestor commit and re-creates the conflict.
+4. **Force-pushing to a sandbox-managed PR branch may fail with `stale
+   info` because the agent cannot fetch the remote ref.** When that
+   happens, push the rebased branch under a new name (`<branch>-rebased`
+   or `-final`) and open a replacement PR; close the old PR without
+   merging.
+5. **Standalone PRs that touch files broken on main need their fix
+   carried forward.** PR #4 (UI label test) and PR #5 (steering doc)
+   each had to cherry-pick the C1 JSX fix from #1 because the test /
+   build wouldn't pass on main alone. Lesson: any PR that runs CI
+   independently must compile against `main` as it currently is.
+
+### Mechanics for an audit-style cleanup
+
+```bash
+# After PR #N (lower) lands on main:
+git fetch origin
+git checkout fix/audit-stage-N+1
+
+# Find the old base — the squash commit on main that this branch was
+# originally rebased onto. `git log` against origin/main usually shows
+# it as the last "(#N)" line; copy that hash.
+OLD_BASE=<sha of the squash commit you originally branched off>
+
+git rebase --onto origin/main "$OLD_BASE" fix/audit-stage-N+1
+# Resolve any conflicts that come from dedup work where the upstream
+# PR removed an inline helper that the downstream branch still owned.
+# (See PR #7's lib/services/message.service.ts dedup, which left a
+# stale local resolveWorkspaceId after the rebase.)
+
+npm run typecheck && npm run lint && npx vitest run
+
+# If the agent push tool reports `stale info`, push to a fresh branch:
+git checkout -b fix/audit-stage-N+1-rebased
+git push -u origin fix/audit-stage-N+1-rebased
+# Open a replacement PR, close the old one without merging.
+```
+
+### When to opt out of the stack
+
+If a downstream PR can be split into parts that don't depend on the
+upstream change, ship them as independent PRs against main. The
+audit's PR #4 and PR #5 were intentionally kept independent for this
+reason — they merged in any order. Reserve stacking for cases where
+the dependency is real (e.g. test fixtures introduced upstream that
+downstream tests need).
