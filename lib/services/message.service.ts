@@ -270,13 +270,19 @@ export async function create(input: CreateMessageInput): Promise<Message> {
 }
 
 /**
- * Match every `@<name>` token in a free-form message. The trailing
- * boundary class accepts ASCII letters, digits, underscore, and CJK
- * characters so a Chinese name like `@艾达` is still picked up.
+ * Match every `@<name>` token in a free-form message.
+ *
+ * The character class uses the Unicode property escapes `\p{L}`
+ * (any letter, every script — Latin, Han, Hangul, Cyrillic, …) and
+ * `\p{N}` (any digit) plus `_` so a Chinese name like `@艾达`, a
+ * Japanese name like `@さくら`, or a Korean name like `@민수` is
+ * still picked up. The ASCII-only `\w\u4e00-\u9fff` range used by
+ * the original regex missed CJK supplementary-plane characters and
+ * non-CJK non-Latin scripts (audit nit L3).
  *
  * Captures group 1 holds the bare name (no leading `@`).
  */
-const MENTION_REGEX = /@([\w\u4e00-\u9fff]+)/g;
+const MENTION_REGEX = /@([\p{L}\p{N}_]+)/gu;
 
 /**
  * Common Chinese transliterations of each AI colleague's English

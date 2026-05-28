@@ -36,6 +36,7 @@ import type { IncomingMessage, Server as HTTPServer } from 'node:http';
 import { decode, getToken } from 'next-auth/jwt';
 import { Server as SocketIOServer } from 'socket.io';
 
+import { parseCookieHeader, readChunkedCookie } from '@/lib/cookie-parser';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
 import prisma from '@/lib/prisma';
@@ -95,40 +96,6 @@ function getCookieHeader(req: IncomingMessage): string {
   const header = req.headers.cookie;
   if (Array.isArray(header)) return header.join('; ');
   return header ?? '';
-}
-
-function parseCookieHeader(header: string): Record<string, string> {
-  if (header.length === 0) return {};
-  const cookies: Record<string, string> = {};
-  for (const pair of header.split(';')) {
-    const separatorIndex = pair.indexOf('=');
-    if (separatorIndex <= 0) continue;
-    const name = pair.slice(0, separatorIndex).trim();
-    const rawValue = pair.slice(separatorIndex + 1).trim();
-    if (name.length === 0) continue;
-    try {
-      cookies[name] = decodeURIComponent(rawValue);
-    } catch {
-      cookies[name] = rawValue;
-    }
-  }
-  return cookies;
-}
-
-function readChunkedCookie(
-  cookies: Record<string, string>,
-  cookieName: string,
-): string | null {
-  const chunks = Object.entries(cookies)
-    .filter(([name]) => name === cookieName || name.startsWith(`${cookieName}.`))
-    .sort(([left], [right]) => {
-      const leftSuffix = Number(left.split('.').pop() ?? '0');
-      const rightSuffix = Number(right.split('.').pop() ?? '0');
-      return leftSuffix - rightSuffix;
-    });
-
-  if (chunks.length === 0) return null;
-  return chunks.map(([, value]) => value).join('');
 }
 
 /**
@@ -354,6 +321,19 @@ export function createIOServer(httpServer: HTTPServer): AppIOServer {
       } catch {
         // Swallow transient DB errors — the client can retry.
       }
+    });
+
+    // Mirror unsubscribe so long-lived sessions release rooms when the
+    // user navigates away from a channel. Without this, every channel
+    // a socket has ever subscribed to remains in its room set until the
+    // socket disconnects, growing the per-socket bookkeeping unbounded
+    // on heavy users (audit nit L2). No DB lookup is needed — leaving a
+    // room you are not in is a no-op in Socket.io.
+    socket.on('unsubscribe:channel', (channelId: string) => {
+      if (typeof channelId !== 'string' || channelId.length === 0) {
+        return;
+      }
+      void socket.leave(`channel:${channelId}`);
     });
 
     // Structured disconnect log so operators can correlate transient

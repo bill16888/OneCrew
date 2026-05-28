@@ -246,12 +246,6 @@ export function getClientSocket(): AppClientSocket {
  * If the socket has never been constructed, this call lazily creates it
  * via {@link getClientSocket}.
  *
- * MVP scope: there is no `unsubscribe:channel` round-trip. Leaving the
- * room is handled implicitly when the socket disconnects, and the next
- * call simply joins a different room. Components viewing only one
- * channel at a time can call this helper from a `useEffect` and not worry
- * about cleanup.
- *
  * @param channelId - The channel id to subscribe to. Empty strings are
  *   ignored to avoid accidentally joining `channel:`.
  */
@@ -261,4 +255,23 @@ export function subscribeToChannel(channelId: string): void {
   }
   const socket = getClientSocket();
   socket.emit('subscribe:channel', channelId);
+}
+
+/**
+ * Mirror of {@link subscribeToChannel}: emit `unsubscribe:channel` so
+ * the server detaches this socket from `channel:{channelId}` before
+ * the user moves to a different room. Pair this with
+ * `subscribeToChannel` in a `useEffect` cleanup so long-lived sessions
+ * do not accumulate room memberships (audit nit L2).
+ *
+ * Empty strings are ignored to avoid sending bogus events.
+ */
+export function unsubscribeFromChannel(channelId: string): void {
+  if (typeof channelId !== 'string' || channelId.length === 0) {
+    return;
+  }
+  // Only emit on an already-constructed socket; if no one has called
+  // `getClientSocket()` yet there cannot be any rooms to leave.
+  if (!socketInstance) return;
+  socketInstance.emit('unsubscribe:channel', channelId);
 }
