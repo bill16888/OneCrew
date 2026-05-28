@@ -153,12 +153,19 @@ export interface ServerToClientEvents {
 }
 
 /**
- * Client → server event signatures. Currently a single channel-room
- * subscription event used by `lib/realtime/io.ts` to join `channel:{id}`
- * rooms (see design.md → "Realtime" → "会话校验中间件").
+ * Client → server event signatures. Channel-room subscription /
+ * unsubscription used by `lib/realtime/io.ts` to attach the socket
+ * to / detach it from `channel:{id}` rooms (see design.md → "Realtime"
+ * → "会话校验中间件").
+ *
+ * `unsubscribe:channel` is sent when a client navigates away from a
+ * channel view so the server can release the room membership before
+ * the socket disconnects, preventing zombie rooms and bounded memory
+ * growth on long-lived sessions (audit nit L2).
  */
 export interface ClientToServerEvents {
   'subscribe:channel': (channelId: string) => void;
+  'unsubscribe:channel': (channelId: string) => void;
 }
 
 /**

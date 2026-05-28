@@ -144,6 +144,33 @@ const envSchema = z.object({
     .nonnegative('AI_DAILY_BUDGET_USD must be ≥ 0')
     .default(5),
 
+  /**
+   * USD pricing per 1,000,000 input / output tokens used by the budget
+   * tracker (`lib/ai/budget.ts`). Defaults to DeepSeek's published
+   * cache-MISS pricing as of 2026-05; override either when a price
+   * change ships from the provider or when pinning to a different
+   * model with different rates (audit finding L1).
+   */
+  AI_INPUT_PRICE_PER_M_USD: z.coerce
+    .number()
+    .nonnegative('AI_INPUT_PRICE_PER_M_USD must be ≥ 0')
+    .default(1.07),
+
+  AI_OUTPUT_PRICE_PER_M_USD: z.coerce
+    .number()
+    .nonnegative('AI_OUTPUT_PRICE_PER_M_USD must be ≥ 0')
+    .default(1.1),
+
+  /**
+   * Notice posted to `#general` when the daily AI budget trips the
+   * circuit breaker. Operators can localise this without code changes
+   * (audit nit L11). The default keeps the original Simplified Chinese
+   * notice for backward compatibility.
+   */
+  AI_BUDGET_EXCEEDED_NOTICE: z
+    .preprocess(emptyStringToUndefined, z.string().min(1).optional())
+    .default('⚠️ AI 今日预算已用尽，将于明日 UTC 0 点恢复'),
+
   AI_AGENT_INTERVAL_MS: z.coerce
     .number()
     .int('AI_AGENT_INTERVAL_MS must be an integer')

@@ -8,6 +8,7 @@ import { MessageComposer } from '@/components/channel/MessageComposer';
 import {
   getClientSocket,
   subscribeToChannel,
+  unsubscribeFromChannel,
 } from '@/lib/realtime/client';
 import { EVENTS, type MessageNewPayload } from '@/lib/realtime/events';
 
@@ -181,6 +182,10 @@ export function ChannelView({
       socket.off('connect', onConnect);
       socket.off('disconnect', onDisconnect);
       socket.off('connect_error', onConnectError);
+      // Release the room membership so a long-lived session does not
+      // keep accumulating channel rooms as the user navigates around
+      // the workspace (audit nit L2).
+      unsubscribeFromChannel(channelId);
     };
   }, [channelId, userDirectory]);
 

@@ -77,7 +77,36 @@ RUN npx prisma generate
 RUN npm run build
 
 # ----------------------------------------------------------------------
-# Stage 3 — minimal production runtime
+# Stage 3 — install production dependencies only (drops devDeps)
+# ----------------------------------------------------------------------
+#
+# The build stage above keeps every dev tool in `node_modules`
+# (typescript, vitest, eslint, playwright, …). Copying that into the
+# runtime image ships ~250-400 MB of unused tarballs. This stage runs
+# a fresh `npm ci --omit=dev` so the runner only receives the
+# `dependencies` declared in package.json — including `tsx` and
+# `@prisma/client`, which are required at runtime (audit nit L7).
+#
+# We also generate the Prisma client here because `npm ci` blows away
+# whatever `npx prisma generate` produced in the builder stage.
+FROM node:20-alpine AS prod-deps
+
+WORKDIR /app
+
+RUN apk add --no-cache libc6-compat openssl
+
+COPY package.json package-lock.json .npmrc ./
+RUN npm ci --no-audit --no-fund --omit=dev
+
+# Prisma client lives under `node_modules/.prisma` and `node_modules/@prisma/client`.
+# Re-generate so production has the typed runtime even though
+# `prisma generate` is implicitly skipped when the schema is absent
+# from package.json's `prisma` field.
+COPY prisma ./prisma
+RUN npx prisma generate
+
+# ----------------------------------------------------------------------
+# Stage 4 — minimal production runtime
 # ----------------------------------------------------------------------
 FROM node:20-alpine AS runner
 
@@ -98,13 +127,15 @@ ENV NODE_ENV=production \
 RUN addgroup --system --gid 1001 nodejs \
  && adduser --system --uid 1001 nextjs
 
-# Copy the build artifacts. We copy `node_modules` from `deps` because
-# the build itself does not prune devDependencies; for an image
-# absolutely free of devDeps you can switch to `npm ci --omit=dev` here.
+# Copy the build artifacts. We pull `node_modules` from the slim
+# `prod-deps` stage so dev tooling (typescript, vitest, eslint, …) is
+# absent from the runtime image — only `dependencies` declared in
+# package.json (including `tsx` and `@prisma/client`) ship to
+# production (audit nit L7).
 COPY --from=builder --chown=nextjs:nodejs /app/.next ./.next
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
+COPY --from=prod-deps --chown=nextjs:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=nextjs:nodejs /app/package.json ./package.json
 COPY --from=builder --chown=nextjs:nodejs /app/server.ts ./server.ts
 COPY --from=builder --chown=nextjs:nodejs /app/tsconfig.json ./tsconfig.json
