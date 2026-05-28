@@ -222,3 +222,142 @@ describe('Feature: ai-native-team-workspace, Property 14: Mock 工具的纯净�
     );
   });
 });
+
+
+
+describe('Audit C4 — per-AI tool whitelist enforcement', () => {
+  it('undefined allowedTools = full surface (Ada / Hopper backwards compat)', async () => {
+    const result = await dispatchTool(
+      { aiUserId: 'u_ada' },
+      {
+        id: 't1',
+        name: 'mock_web_search',
+        input: { query: 'hello' },
+      },
+    );
+    expect(result.is_error).toBeUndefined();
+  });
+
+  it('empty allowedTools = full surface (back-compat for created custom AIs without locks)', async () => {
+    const result = await dispatchTool(
+      { aiUserId: 'u_custom', allowedTools: [] },
+      {
+        id: 't1',
+        name: 'mock_web_search',
+        input: { query: 'hello' },
+      },
+    );
+    expect(result.is_error).toBeUndefined();
+  });
+
+  it('non-empty allowedTools rejects tools outside the whitelist with is_error', async () => {
+    const result = await dispatchTool(
+      { aiUserId: 'u_locked', allowedTools: ['mock_web_search'] },
+      {
+        id: 't1',
+        name: 'create_task',
+        input: { title: 'should not run' },
+      },
+    );
+    expect(result.is_error).toBe(true);
+    expect(String(result.content)).toContain("Tool 'create_task' is not enabled");
+    expect(String(result.content)).toContain('Allowed: mock_web_search');
+  });
+
+  it('non-empty allowedTools admits whitelisted tools as usual', async () => {
+    const result = await dispatchTool(
+      { aiUserId: 'u_locked', allowedTools: ['mock_web_search'] },
+      {
+        id: 't1',
+        name: 'mock_web_search',
+        input: { query: 'allowed' },
+      },
+    );
+    expect(result.is_error).toBeUndefined();
+  });
+
+  it('whitelist runs BEFORE schema validation (failure messages reflect the gate that fired first)', async () => {
+    // create_task with a bad payload (empty title) AND not in the
+    // whitelist — should hit the whitelist branch, not the schema
+    // branch.
+    const result = await dispatchTool(
+      { aiUserId: 'u_locked', allowedTools: ['mock_web_search'] },
+      {
+        id: 't1',
+        name: 'create_task',
+        input: { title: '' },
+      },
+    );
+    expect(result.is_error).toBe(true);
+    expect(String(result.content)).toContain('not enabled');
+    expect(String(result.content)).not.toContain('Invalid arguments');
+  });
+});
+
+describe('Audit L8 — cyclic approval payload escalates to high', () => {
+  it('returns approval result with risk=high when the model emits a self-referencing payload', async () => {
+    const createApproval = vi.mocked(ApprovalService.create);
+    createApproval.mockClear();
+
+    // A payload with a self-referencing field. JSON.stringify throws
+    // TypeError on cyclic structures, which the risk inferer catches
+    // and turns into a 'high' classification BEFORE the keyword
+    // matchers run.
+    const cyclic: Record<string, unknown> = { a: 1 };
+    cyclic.self = cyclic;
+
+    const result = await dispatchTool(
+      { aiUserId: 'u_ada' },
+      {
+        id: 'cyclic_1',
+        name: 'request_approval',
+        input: {
+          // 'notify_users' would normally infer 'medium' via the
+          // /notify|send|message/ keyword arm. With a cyclic payload
+          // we expect the cyclic branch to short-circuit to 'high'
+          // BEFORE that arm runs.
+          action: 'notify_users',
+          payload: cyclic,
+          reason: 'send a notification',
+        },
+      },
+    );
+
+    expect(result.is_error).toBeUndefined();
+    expect(createApproval).toHaveBeenCalledTimes(1);
+    const recorded = createApproval.mock.calls[0]?.[0]?.payload as
+      | Record<string, unknown>
+      | undefined;
+    expect(recorded).toBeDefined();
+    const analysis = recorded?.approvalAnalysis as
+      | Record<string, unknown>
+      | undefined;
+    expect(analysis?.riskLevel).toBe('high');
+  });
+
+  it('keyword-driven risk still works for non-cyclic payloads', async () => {
+    const createApproval = vi.mocked(ApprovalService.create);
+    createApproval.mockClear();
+
+    await dispatchTool(
+      { aiUserId: 'u_ada' },
+      {
+        id: 'kw_1',
+        name: 'request_approval',
+        input: {
+          action: 'delete_record',
+          payload: { recordId: 42 },
+          reason: 'cleanup task',
+        },
+      },
+    );
+
+    const recorded = createApproval.mock.calls[0]?.[0]?.payload as
+      | Record<string, unknown>
+      | undefined;
+    const analysis = recorded?.approvalAnalysis as
+      | Record<string, unknown>
+      | undefined;
+    expect(analysis?.riskLevel).toBe('high');
+  });
+});
