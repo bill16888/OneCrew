@@ -24,26 +24,19 @@ import type { Message, Prisma } from '@prisma/client';
 import { logger } from '@/lib/logger';
 import { agenticEmitter } from '@/lib/loop/emitter';
 import prisma from '@/lib/prisma';
+import { rateLimit } from '@/lib/ratelimit';
 import { EVENTS, type MessageNewPayload } from '@/lib/realtime/events';
 import { getIO } from '@/lib/realtime/io';
+import { resolveWorkspaceId } from '@/lib/workspace';
 
 /**
- * Default workspace identifier used when `process.env.WORKSPACE_ID` is
- * unset. Mirrors the single-workspace MVP assumption (Requirement 1.7)
- * and is kept aligned with `lib/services/task.service.ts`,
- * `lib/services/approval.service.ts`, and `prisma/seed.ts`.
+ * Mention bucket: how many @-mentions a single human user may emit
+ * across all messages in a rolling minute. The cap is intentionally
+ * generous (a normal pasted block has 1-3 mentions; this only blocks
+ * deliberate spam patterns) but bounded so a runaway client cannot
+ * spam-wake every AI in the workspace (audit finding M3).
  */
-const DEFAULT_WORKSPACE_ID = 'ws_default';
-
-/**
- * Resolve the active workspace id from the environment, falling back
- * to {@link DEFAULT_WORKSPACE_ID}. Read lazily (per call) so test
- * harnesses can mutate `process.env.WORKSPACE_ID` between invocations.
- */
-function resolveWorkspaceId(): string {
-  const fromEnv = process.env.WORKSPACE_ID;
-  return fromEnv && fromEnv.length > 0 ? fromEnv : DEFAULT_WORKSPACE_ID;
-}
+const MENTION_LIMIT = { capacity: 30, windowMs: 60_000 } as const;
 
 /**
  * Maximum allowed length (in UTF-16 code units) for a single message body.
@@ -257,8 +250,15 @@ export async function create(input: CreateMessageInput): Promise<Message> {
   // approval flow uses keeps the scheduling rule narrow: AIs only
   // act when (a) a human asked them to, or (b) a human approved a
   // pending request.
+  //
+  // A per-user mention rate limit is also applied here (audit M3): a
+  // signed-in user that pastes large blocks of text containing many
+  // AI mentions cannot keep waking AIs faster than the configured
+  // bucket allows. Hitting the limit drops further wakeups for this
+  // message but never blocks the message itself — the persisted /
+  // broadcast write has already happened above.
   if (!user.isAI) {
-    void wakeMentionedAIs(message.content).catch(() => {
+    void wakeMentionedAIs(message.content, input.userId).catch(() => {
       // Mention resolution failures are non-fatal; the message has
       // already been persisted + broadcast. Worst case: the AI
       // doesn't get its instant wakeup and runs on the next tick (or
@@ -340,12 +340,34 @@ function extractCustomMentionAliases(aiSettings: unknown): readonly string[] {
  * Errors are bubbled up so the caller can decide whether to log;
  * `MessageService.create` swallows them (see comment above).
  */
-async function wakeMentionedAIs(content: string): Promise<void> {
+async function wakeMentionedAIs(
+  content: string,
+  senderId: string,
+): Promise<void> {
   const mentions = new Set<string>();
   for (const match of content.matchAll(MENTION_REGEX)) {
     mentions.add(match[1].trim().toLowerCase());
   }
   if (mentions.size === 0) return;
+
+  // Rate-limit @-mentions per sender so a paste of AI-authored text
+  // (or a runaway client) cannot spam wakeups. We consume one token
+  // per mention so a single message with N mentions costs N tokens
+  // rather than 1; that keeps the bucket meaningful even when the
+  // user crafts one giant message instead of many small ones.
+  const verdict = rateLimit('messages.mentions', senderId, MENTION_LIMIT);
+  if (!verdict.ok) {
+    logger.warn(
+      {
+        event: 'mention_wakeup_throttled',
+        senderId,
+        mentionCount: mentions.size,
+        retryAfterMs: verdict.retryAfterMs,
+      },
+      'Mention wakeup rate limit hit; skipping wakeups for this message',
+    );
+    return;
+  }
 
   const aiUsers = await prisma.user.findMany({
     where: { isAI: true, aiStatus: 'active' },

@@ -72,6 +72,33 @@ function resolveSocketUrl(): string | undefined {
   return fromEnv && fromEnv.length > 0 ? fromEnv : undefined;
 }
 
+const VALID_TRANSPORTS = ['websocket', 'polling'] as const;
+type SocketTransport = (typeof VALID_TRANSPORTS)[number];
+
+/**
+ * Resolve the Socket.io transport list from
+ * `NEXT_PUBLIC_SOCKET_TRANSPORTS` (comma-separated). Defaults to
+ * `['websocket', 'polling']` so healthy networks use WS automatically
+ * and broken WS fabrics fall back to polling without a redeploy.
+ *
+ * Unknown / empty entries are dropped silently. If the env var resolves
+ * to no valid transport, we fall back to the default rather than crash
+ * the singleton — better to degrade than to break realtime entirely.
+ */
+function resolveTransports(): readonly SocketTransport[] {
+  const raw = process.env.NEXT_PUBLIC_SOCKET_TRANSPORTS;
+  if (!raw || raw.trim().length === 0) {
+    return ['websocket', 'polling'];
+  }
+  const parsed = raw
+    .split(',')
+    .map((t) => t.trim().toLowerCase())
+    .filter((t): t is SocketTransport =>
+      (VALID_TRANSPORTS as readonly string[]).includes(t),
+    );
+  return parsed.length > 0 ? parsed : ['websocket', 'polling'];
+}
+
 /**
  * Module-level singleton. Lazily constructed on the first call to
  * {@link getClientSocket}. Held as `null` until then so that bundlers do
@@ -166,18 +193,18 @@ export function getClientSocket(): AppClientSocket {
     // same-origin session cookie that the App Router uses for HTTP
     // routes.
     withCredentials: true,
-    // Pin to long-polling. We tried `['polling', 'websocket']` first;
-    // polling worked but socket.io's automatic upgrade to WebSocket
-    // consistently fails on Railway's edge proxy with
-    // `WebSocket is closed before the connection is established`,
-    // even after we routed `/socket.io/...` past Next.js. The
-    // upgrade failure is non-fatal — socket.io stays on polling and
-    // events keep flowing — but it spams the console with red
-    // warnings on every reconnect and re-runs the upgrade probe
-    // forever. Pinning to polling-only gives us a clean console and
-    // identical functionality at the cost of ~500ms of additional
-    // tail latency vs. a healthy WS connection.
-    transports: ['polling'],
+    // Transport selection. Default order is `['websocket', 'polling']`
+    // so a healthy WebSocket connection is used when available (lower
+    // latency, fewer server connections) and the client falls back to
+    // long-polling when WS handshake or upgrade fails.
+    //
+    // Some edge proxies (notably some Railway / Cloudflare deployments)
+    // strip the `Upgrade` header, breaking WS even when polling works.
+    // For those environments operators can pin transports via the
+    // `NEXT_PUBLIC_SOCKET_TRANSPORTS` env var, e.g. set it to `polling`
+    // to recreate the previous polling-only behaviour without a
+    // redeploy (audit finding M2).
+    transports: [...resolveTransports()],
     auth: (cb: (payload: { sessionToken: string }) => void) => {
       // The callback must remain synchronous from socket.io's perspective,
       // but we can still await `getSession()` and invoke `cb` once we

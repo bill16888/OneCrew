@@ -40,14 +40,7 @@ import {
   type ApprovalCreatedPayload,
 } from '@/lib/realtime/events';
 import { getIO } from '@/lib/realtime/io';
-
-/**
- * Default workspace identifier used when `process.env.WORKSPACE_ID` is unset.
- * Mirrors the single-workspace MVP assumption (requirements.md §1.7) and is
- * kept aligned with `lib/realtime/io.ts`, `lib/services/task.service.ts`
- * and `prisma/seed.ts`.
- */
-const DEFAULT_WORKSPACE_ID = 'ws_default';
+import { resolveWorkspaceId } from '@/lib/workspace';
 
 /**
  * Threshold for {@link isStale}: an approval is considered stale once it
@@ -55,18 +48,6 @@ const DEFAULT_WORKSPACE_ID = 'ws_default';
  * Requirements 6.7.
  */
 const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000;
-
-/**
- * Resolve the active workspace id from the validated environment, falling
- * back to {@link DEFAULT_WORKSPACE_ID}. We intentionally read `process.env`
- * lazily here (instead of caching `env.WORKSPACE_ID`) so test harnesses
- * can mutate `process.env.WORKSPACE_ID` between invocations, matching the
- * pattern used in `lib/realtime/io.ts`.
- */
-function resolveWorkspaceId(): string {
-  const fromEnv = process.env.WORKSPACE_ID;
-  return fromEnv && fromEnv.length > 0 ? fromEnv : DEFAULT_WORKSPACE_ID;
-}
 
 /**
  * Coerce a persisted Prisma JSON value into the wire shape accepted by
