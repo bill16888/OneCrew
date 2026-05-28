@@ -23,6 +23,7 @@
 | `DEEPSEEK_BASE_URL`                | 默认 `https://api.deepseek.com`             | 只在指向自建 OpenAI-compatible 网关时才覆盖              |
 | `DEEPSEEK_MODEL`                   | 默认 `deepseek-chat`                        | 切 `deepseek-reasoner` 启用 chain-of-thought 模型        |
 | `WORKSPACE_ID`                     | 非空字符串                                  | 默认 `ws_default`，与 seed 必须一致                       |
+| `SEED_HUMAN_PASSWORD`              | 强密码（首次部署后立即换掉种子账户密码） | **生产环境必填**——`prisma:seed` 在 `NODE_ENV=production` 下若未设置会拒绝降级到 `password123`，整个 seed step 失败 |
 
 **有默认值但生产强烈建议显式设置**：
 
@@ -31,8 +32,12 @@
 | `NODE_ENV`                         | `production`    | 决定 Sentry 是否启用、Next.js 是否走 prod build            |
 | `AI_DAILY_BUDGET_USD`              | `5`             | 超过这个数 AI runtime 会熔断并广播一条系统消息            |
 | `AI_AGENT_INTERVAL_MS`             | `30000`         | Agentic Loop tick 周期（ms），默认 30 秒                  |
+| `AI_INPUT_PRICE_PER_M_USD`         | `1.07`          | DeepSeek 改价时调整；默认对应 2026-05 公布的非缓存命中价 |
+| `AI_OUTPUT_PRICE_PER_M_USD`        | `1.10`          | 同上                                                      |
+| `AI_BUDGET_EXCEEDED_NOTICE`        | （留空 = 默认中文） | 非中文部署改成本地化文案，无需改代码                     |
 | `PORT`                             | Railway 自动注入 | 不要手动写死成 3000                                       |
 | `NEXT_PUBLIC_SOCKET_URL`           | 与 NEXTAUTH_URL 同源 | 浏览器端要去连的 Socket.io 地址                           |
+| `NEXT_PUBLIC_SOCKET_TRANSPORTS`    | `websocket,polling` | 仅当代理拦 WS 升级时改为 `polling`。**注意**：构建期注入，改动需要 rebuild + redeploy |
 
 **可选（缺失会跳过对应功能而不是 crash）**：
 
@@ -56,6 +61,22 @@ Railway 的 `startCommand` 已经是 `npx prisma migrate deploy && npx tsx serve
 2. 找到包含 `Applying migration ...` 的行；如果是首次部署应该看到 prisma 列出的所有 migration 文件依次 apply。
 3. 紧随其后必须出现 `All migrations have been successfully applied.` 或 `No pending migrations to apply.`。
 4. **失败信号**：日志里出现 `Error: P1001`（连不上 DB）/ `P3009`（迁移冲突）→ 立即回滚到上一次 deploy，不要继续。
+
+> **从旧的 `db push` 数据库切换过来？** 第一次会触发 `P3005`（schema 非空但 migration history 空）。
+> 启动脚本 (`scripts/railway-start.ts`) **不会自动 baseline**，因为审计发现"自动 baseline 全部目录"会静默跳过新 migration。
+> 处理方式：在 Railway 临时设置 `PRISMA_BASELINE_MIGRATIONS=0_init`（只列已经存在于库里的目录），重启一次成功后立即取消该 env。
+
+---
+
+### 0.3 ✅ `/api/admin/budget` 仍然在中间件鉴权之内（不是无 auth）
+
+注意：旧文档说这个端点 "intentional no-auth, internal-only"。现在它在中间件下要求登录返回 JSON 401。如果集群内的 Prometheus / 仪表盘 / sidecar 之前直接 `curl` 这个 URL，**会断**。
+
+应对方案二选一：
+- **快速** — 拉一个登录态（用 service account 邮箱 + 密码登录，把 cookie 喂给 scraper）。
+- **正确** — 等下个迭代加 Bearer token 兜底（路由文档已经预留，没实装），或者在 K8s NetworkPolicy 层把它限制到内网。
+
+如果你之前没在集群里 curl 这个 endpoint，本节直接打勾。
 
 ---
 

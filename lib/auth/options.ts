@@ -24,6 +24,38 @@ import type { NextAuthOptions, User as NextAuthUser } from 'next-auth';
 import CredentialsProvider from 'next-auth/providers/credentials';
 
 import prisma from '@/lib/prisma';
+import { rateLimit } from '@/lib/ratelimit';
+
+/**
+ * Tight per-(IP, email) bucket on credential checks. NextAuth's
+ * `authorize` is reachable without a session, so it sits OUTSIDE the
+ * `/api/*` rate limit applied by the API helpers — the only thing
+ * standing between an attacker and the bcrypt verifier is this gate.
+ *
+ * 5 attempts per minute is generous enough not to lock out a typo-
+ * prone human but tight enough that the bcrypt cost (rounds 12,
+ * ~150 ms on commodity hardware) bounds the attack rate well below
+ * the network ceiling (audit follow-up to PR #1).
+ */
+const LOGIN_LIMIT = { capacity: 5, windowMs: 60_000 } as const;
+
+/**
+ * Best-effort client identifier for rate-limit keying. NextAuth v4
+ * passes the underlying request as the second argument to `authorize`,
+ * exposing reverse-proxy headers we can use as a coarse IP. We pair
+ * this with the submitted email so two attackers behind the same NAT
+ * are still bucketed independently.
+ */
+function clientIp(req: { headers?: Record<string, string | string[] | undefined> } | undefined): string {
+  const header = (key: string): string | undefined => {
+    const value = req?.headers?.[key];
+    if (Array.isArray(value)) return value[0];
+    return typeof value === 'string' ? value : undefined;
+  };
+  const fwd = header('x-forwarded-for');
+  if (fwd) return fwd.split(',')[0].trim();
+  return header('x-real-ip') ?? 'unknown';
+}
 
 /**
  * NextAuth options consumed by the App Router catch-all route at
@@ -46,8 +78,14 @@ export const authOptions: NextAuthOptions = {
        * `null` to signal authentication failure. Per the spec, AI users
        * and users without a `passwordHash` are rejected (no session is
        * ever created for them).
+       *
+       * Per-(IP, email) rate limiting runs BEFORE the bcrypt compare so
+       * a brute-force attacker cannot use the verifier as a CPU oracle
+       * (audit follow-up to PR #1). Returning `null` on rate-limit hit
+       * keeps the response indistinguishable from a bad password — the
+       * attacker cannot tell whether they hit the cap or guessed wrong.
        */
-      async authorize(credentials): Promise<NextAuthUser | null> {
+      async authorize(credentials, req): Promise<NextAuthUser | null> {
         const email = credentials?.email?.trim();
         const password = credentials?.password;
         // Both fields must be non-empty after trimming. We deliberately do
@@ -56,6 +94,15 @@ export const authOptions: NextAuthOptions = {
         if (!email || !password || password.trim().length === 0) {
           return null;
         }
+
+        // Bucket key: lower-cased email + first IP from the
+        // X-Forwarded-For header. Two attackers behind the same NAT
+        // therefore share buckets only if they target the same email,
+        // which is the threat we care about here.
+        const ip = clientIp(req as { headers?: Record<string, string | string[] | undefined> } | undefined);
+        const bucketKey = `${ip}|${email.toLowerCase()}`;
+        const verdict = rateLimit('auth.credentials', bucketKey, LOGIN_LIMIT);
+        if (!verdict.ok) return null;
 
         const user = await prisma.user.findUnique({ where: { email } });
         if (!user) return null;

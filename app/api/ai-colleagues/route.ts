@@ -18,11 +18,10 @@ import {
 } from '@/lib/api-helpers';
 import prisma from '@/lib/prisma';
 import { RateLimits } from '@/lib/ratelimit';
+import { resolveWorkspaceId } from '@/lib/workspace';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const DEFAULT_WORKSPACE_ID = 'ws_default';
 
 const CREATE_AI_COLLEAGUE_BODY = z
   .object({
@@ -46,11 +45,6 @@ const CREATE_AI_COLLEAGUE_BODY = z
   .strict();
 
 type CreateAIColleagueBody = z.infer<typeof CREATE_AI_COLLEAGUE_BODY>;
-
-function resolveWorkspaceId(): string {
-  const fromEnv = process.env.WORKSPACE_ID;
-  return fromEnv && fromEnv.length > 0 ? fromEnv : DEFAULT_WORKSPACE_ID;
-}
 
 function formatZodError(err: z.ZodError): string {
   const issue = err.issues[0];

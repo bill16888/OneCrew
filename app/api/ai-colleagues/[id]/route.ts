@@ -17,11 +17,10 @@ import {
 } from '@/lib/api-helpers';
 import prisma from '@/lib/prisma';
 import { RateLimits } from '@/lib/ratelimit';
+import { resolveWorkspaceId } from '@/lib/workspace';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const DEFAULT_WORKSPACE_ID = 'ws_default';
 
 interface RouteProps {
   params: { id: string };
@@ -55,11 +54,6 @@ const PATCH_AI_COLLEAGUE_BODY = z
   );
 
 type PatchAIColleagueBody = z.infer<typeof PATCH_AI_COLLEAGUE_BODY>;
-
-function resolveWorkspaceId(): string {
-  const fromEnv = process.env.WORKSPACE_ID;
-  return fromEnv && fromEnv.length > 0 ? fromEnv : DEFAULT_WORKSPACE_ID;
-}
 
 function formatZodError(err: z.ZodError): string {
   const issue = err.issues[0];
