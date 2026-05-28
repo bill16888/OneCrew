@@ -256,6 +256,31 @@ export class Budget {
   }
 
   /**
+   * Decide whether new AI cycles should be skipped on top of the
+   * post-call hard limit enforced by {@link track}.
+   *
+   * `track` only trips AFTER a call has been billed, so the very first
+   * call that crosses the daily limit is always paid for in full. To
+   * avoid overshooting on the next cycle's first round we proactively
+   * pause once the running spend reaches `safetyPercent × limit`. The
+   * default `0.95` leaves ~5% headroom for the in-flight cycle's last
+   * couple of rounds (audit finding M1).
+   *
+   * Always returns `false` when the daily limit is non-positive
+   * (treated as "budgeting disabled").
+   *
+   * @param safetyPercent Fraction of the daily limit that triggers
+   *   pre-emptive pause. Must be in `(0, 1]`; clamped to `0.5..1` to
+   *   avoid pathological misconfiguration.
+   */
+  shouldPauseCycle(safetyPercent = 0.95): boolean {
+    const limit = env.AI_DAILY_BUDGET_USD;
+    if (!Number.isFinite(limit) || limit <= 0) return false;
+    const clamped = Math.min(1, Math.max(0.5, safetyPercent));
+    return this.todayUSD >= limit * clamped;
+  }
+
+  /**
    * Reset today's spend to zero and recompute `resetAt`. Exposed for
    * unit tests only; production code MUST NOT call this.
    */

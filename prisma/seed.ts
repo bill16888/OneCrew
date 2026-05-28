@@ -25,9 +25,42 @@ const prisma = new PrismaClient();
 /** Workspace identifier — keep aligned with `.env` `WORKSPACE_ID`. */
 const WORKSPACE_ID: string = process.env.WORKSPACE_ID ?? 'ws_default';
 const WORKSPACE_NAME = 'Helio Demo Workspace';
-/** Demo password shared by every seeded human user. Documented in README. */
-const HUMAN_PASSWORD = 'password123';
-const BCRYPT_ROUNDS = 10;
+
+/**
+ * Demo password shared by every seeded human user.
+ *
+ * Resolution order:
+ *   1. `SEED_HUMAN_PASSWORD` env var — required for any deployment
+ *      that ships seeded accounts to a real environment.
+ *   2. Falls back to `'password123'` ONLY when `NODE_ENV !==
+ *      'production'`. In production a missing env var is a fatal
+ *      configuration error so we refuse to silently ship a known
+ *      credential (audit finding M5).
+ *
+ * Documented in `README.md`. Operators MUST rotate this immediately
+ * after the first production deploy.
+ */
+function resolveSeedPassword(): string {
+  const fromEnv = process.env.SEED_HUMAN_PASSWORD?.trim();
+  if (fromEnv && fromEnv.length > 0) return fromEnv;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'SEED_HUMAN_PASSWORD must be set when NODE_ENV=production. Refusing to seed with the demo default.',
+    );
+  }
+  console.warn(
+    '[seed] Using insecure default password "password123" because SEED_HUMAN_PASSWORD is not set.\n' +
+      '       This is acceptable for local development ONLY. Set SEED_HUMAN_PASSWORD for any deployed environment.',
+  );
+  return 'password123';
+}
+
+/**
+ * bcrypt cost factor. OWASP 2024 guidance recommends `>= 12` for
+ * web applications; single sign-in latency on a modern CPU stays
+ * well under 200 ms (audit finding M6).
+ */
+const BCRYPT_ROUNDS = Number.parseInt(process.env.SEED_BCRYPT_ROUNDS ?? '12', 10);
 
 interface HumanSeed {
   readonly email: string;
@@ -155,7 +188,8 @@ async function seedChannels(): Promise<void> {
 
 async function main(): Promise<void> {
   console.log(`Seeding workspace "${WORKSPACE_NAME}" (id=${WORKSPACE_ID})…`);
-  const passwordHash: string = hashSync(HUMAN_PASSWORD, BCRYPT_ROUNDS);
+  const seedPassword: string = resolveSeedPassword();
+  const passwordHash: string = hashSync(seedPassword, BCRYPT_ROUNDS);
 
   await seedWorkspace();
   await seedHumans(passwordHash);

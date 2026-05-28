@@ -26,6 +26,7 @@ import type { Task } from '@prisma/client';
 import prisma from '@/lib/prisma';
 import { EVENTS, type TaskUpdatedPayload } from '@/lib/realtime/events';
 import { getIO } from '@/lib/realtime/io';
+import { resolveWorkspaceId } from '@/lib/workspace';
 
 /**
  * The four allowed Kanban columns. Matches the Prisma `TaskStatus` enum
@@ -44,23 +45,6 @@ export const TASK_STATUSES = [
  * Union of valid Task status values.
  */
 export type TaskStatus = (typeof TASK_STATUSES)[number];
-
-/**
- * Default workspace identifier used when `process.env.WORKSPACE_ID` is unset.
- * Mirrors the single-workspace MVP assumption (requirements.md §1.7) and is
- * kept aligned with `lib/realtime/io.ts` and `prisma/seed.ts`.
- */
-const DEFAULT_WORKSPACE_ID = 'ws_default';
-
-/**
- * Resolve the active workspace id from the environment, falling back to
- * {@link DEFAULT_WORKSPACE_ID}. Read lazily (per call) so test harnesses
- * can mutate `process.env.WORKSPACE_ID` between invocations.
- */
-function resolveWorkspaceId(): string {
-  const fromEnv = process.env.WORKSPACE_ID;
-  return fromEnv && fromEnv.length > 0 ? fromEnv : DEFAULT_WORKSPACE_ID;
-}
 
 /**
  * Validation error raised when a caller passes an invalid status to

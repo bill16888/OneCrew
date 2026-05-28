@@ -203,11 +203,12 @@ async function runForAI(aiUserId: string): Promise<void> {
     return;
   }
 
-  // 3. Budget gate: skip this cycle when the daily AI budget has already
-  //    been exceeded so we don't emit a short-lived `ai:thinking { true }`
-  //    that is immediately cancelled inside `runCycle`. The runtime still
-  //    performs its own per-call budget check as a mid-cycle safety net.
-  if (budget.getStats().todayUSD >= budget.getStats().limitUSD) {
+  // 3. Budget gate: skip this cycle when the daily AI budget has
+  //    crossed its safety threshold (default 95% of the limit) so a
+  //    single 5-round cycle's last few calls cannot overshoot the cap.
+  //    The runtime still performs its own per-call budget check as a
+  //    mid-cycle safety net (audit finding M1).
+  if (budget.shouldPauseCycle()) {
     return;
   }
 
