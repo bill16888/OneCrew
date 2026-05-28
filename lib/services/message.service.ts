@@ -39,24 +39,6 @@ import { resolveWorkspaceId } from '@/lib/workspace';
 const MENTION_LIMIT = { capacity: 30, windowMs: 60_000 } as const;
 
 /**
- * Default workspace identifier used when `process.env.WORKSPACE_ID` is
- * unset. Mirrors the single-workspace MVP assumption (Requirement 1.7)
- * and is kept aligned with `lib/services/task.service.ts`,
- * `lib/services/approval.service.ts`, and `prisma/seed.ts`.
- */
-const DEFAULT_WORKSPACE_ID = 'ws_default';
-
-/**
- * Resolve the active workspace id from the environment, falling back
- * to {@link DEFAULT_WORKSPACE_ID}. Read lazily (per call) so test
- * harnesses can mutate `process.env.WORKSPACE_ID` between invocations.
- */
-function resolveWorkspaceId(): string {
-  const fromEnv = process.env.WORKSPACE_ID;
-  return fromEnv && fromEnv.length > 0 ? fromEnv : DEFAULT_WORKSPACE_ID;
-}
-
-/**
  * Maximum allowed length (in UTF-16 code units) for a single message body.
  * Mirrors the limit on `send_channel_message.input_schema.content` so the
  * AI tool surface and human surface share the same upper bound.
@@ -288,13 +270,19 @@ export async function create(input: CreateMessageInput): Promise<Message> {
 }
 
 /**
- * Match every `@<name>` token in a free-form message. The trailing
- * boundary class accepts ASCII letters, digits, underscore, and CJK
- * characters so a Chinese name like `@艾达` is still picked up.
+ * Match every `@<name>` token in a free-form message.
+ *
+ * The character class uses the Unicode property escapes `\p{L}`
+ * (any letter, every script — Latin, Han, Hangul, Cyrillic, …) and
+ * `\p{N}` (any digit) plus `_` so a Chinese name like `@艾达`, a
+ * Japanese name like `@さくら`, or a Korean name like `@민수` is
+ * still picked up. The ASCII-only `\w\u4e00-\u9fff` range used by
+ * the original regex missed CJK supplementary-plane characters and
+ * non-CJK non-Latin scripts (audit nit L3).
  *
  * Captures group 1 holds the bare name (no leading `@`).
  */
-const MENTION_REGEX = /@([\w\u4e00-\u9fff]+)/g;
+const MENTION_REGEX = /@([\p{L}\p{N}_]+)/gu;
 
 /**
  * Common Chinese transliterations of each AI colleague's English

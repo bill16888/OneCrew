@@ -408,13 +408,21 @@ function inferApprovalRiskLevel(
   payload: Record<string, unknown> | undefined,
   reason: string,
 ): ApprovalRiskLevel {
-  const serializedPayload = (() => {
-    try {
-      return JSON.stringify(payload ?? {});
-    } catch {
-      return '';
-    }
-  })();
+  // Try to serialise the payload so risk-level keywords inside nested
+  // fields (e.g. `payload.target = 'production-db'`) participate in the
+  // matcher below. A cyclic payload makes JSON.stringify throw; in that
+  // case we conservatively bump the implicit risk floor — a model that
+  // produces a self-referencing object is already misbehaving, and we
+  // would rather route it through human review than silently classify
+  // as low.
+  let serializedPayload = '';
+  let payloadSerializationFailed = false;
+  try {
+    serializedPayload = JSON.stringify(payload ?? {});
+  } catch {
+    payloadSerializationFailed = true;
+  }
+
   const text = `${action} ${reason} ${serializedPayload}`.toLowerCase();
 
   if (
@@ -434,7 +442,10 @@ function inferApprovalRiskLevel(
   if (/public|notify|send|message|公开|通知|发送/.test(text)) {
     return 'medium';
   }
-  return 'medium';
+  // Audit nit L8: cyclic payload → escalate the floor from medium to
+  // high so the human reviewer sees the risk surface, not a misleading
+  // "looks fine" assignment.
+  return payloadSerializationFailed ? 'high' : 'medium';
 }
 
 function normalizeApprovalAnalysis({

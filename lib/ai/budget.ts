@@ -88,33 +88,39 @@ export interface ModelPricing {
 }
 
 /**
- * Pricing table keyed by chat model id. Add a new entry whenever
- * `env.DEEPSEEK_MODEL` is pointed at a different model. Keys match
- * exactly the strings DeepSeek's API echoes back in
- * `chat.completions.create({...}).model`.
+ * Pricing table keyed by chat model id. Per-model overrides go here;
+ * unknown / future models fall back to {@link DEFAULT_PRICING}, which
+ * itself is sourced from `env.AI_INPUT_PRICE_PER_M_USD` and
+ * `env.AI_OUTPUT_PRICE_PER_M_USD` so operators can update rates
+ * without redeploying (audit finding L1).
  *
  * Source: DeepSeek public pricing page. Re-verify when changing models.
+ * Last verified: 2026-05.
  */
 export const MODEL_PRICING: Readonly<Record<string, ModelPricing>> = {
-  // Default chat model. Cache-MISS input rate so the breaker trips
-  // conservatively early (see file-level JSDoc).
-  'deepseek-chat': { inputPerMillion: 1.07, outputPerMillion: 1.1 },
-  // Chain-of-thought / reasoning model. Same pricing tier today; if
-  // DeepSeek splits this in the future, update both numbers here.
-  'deepseek-reasoner': { inputPerMillion: 1.07, outputPerMillion: 1.1 },
+  // Hardcoded model-specific entries are intentionally absent in the
+  // MVP — both `deepseek-chat` and `deepseek-reasoner` share the
+  // env-derived default today. Add an entry here only when DeepSeek
+  // splits the per-model pricing.
 };
 
 /**
  * Default pricing applied when an unrecognised model id reaches
- * {@link estimateCostUSD}. We pick the deepseek-chat rate because
- * that is the model the runtime defaults to, and keeping the
- * fallback non-zero ensures the breaker still functions on novel
- * model ids.
+ * {@link estimateCostUSD}. Reads the rates from the validated env so
+ * operators can adjust without a code change (audit finding L1).
+ *
+ * Read lazily inside {@link estimateCostUSD} via {@link getDefaultPricing}
+ * so a long-lived process picks up env changes on the next reload — the
+ * env module itself is read once at boot but tests that mutate
+ * `process.env.AI_*_PRICE_PER_M_USD` between cases still see the new
+ * value.
  */
-const DEFAULT_PRICING: ModelPricing = {
-  inputPerMillion: 1.07,
-  outputPerMillion: 1.1,
-};
+function getDefaultPricing(): ModelPricing {
+  return {
+    inputPerMillion: env.AI_INPUT_PRICE_PER_M_USD,
+    outputPerMillion: env.AI_OUTPUT_PRICE_PER_M_USD,
+  };
+}
 
 /**
  * Subset of a model `usage` payload we actually consume. The bridge
@@ -145,7 +151,7 @@ export function estimateCostUSD(
   usage: UsageSample,
   model = 'deepseek-chat',
 ): number {
-  const pricing = MODEL_PRICING[model] ?? DEFAULT_PRICING;
+  const pricing = MODEL_PRICING[model] ?? getDefaultPricing();
   const input = Number.isFinite(usage.input_tokens)
     ? Math.max(0, usage.input_tokens)
     : 0;

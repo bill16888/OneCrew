@@ -47,6 +47,7 @@
 
 import * as Sentry from '@sentry/nextjs';
 
+import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
 import prisma from '@/lib/prisma';
 import { EVENTS } from '@/lib/realtime/events';
@@ -631,8 +632,10 @@ async function postBudgetExceededNotice(
   aiUserId: string,
   workspaceId: string,
 ): Promise<void> {
-  const NOTICE =
-    '⚠️ AI 今日预算已用尽，将于明日 UTC 0 点恢复';
+  // Notice text is operator-configurable via `AI_BUDGET_EXCEEDED_NOTICE`
+  // so non-Chinese deployments do not have to ship a code change to
+  // localise the message (audit nit L11).
+  const NOTICE = env.AI_BUDGET_EXCEEDED_NOTICE;
   try {
     const channels = await ChannelService.listByWorkspace(workspaceId);
     const general = channels.find((c) => c.name === 'general');
