@@ -56,11 +56,16 @@
  */
 
 import type { Message, Prisma } from '@prisma/client';
-import { getServerSession } from 'next-auth';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
-import { authOptions } from '@/lib/auth/options';
+import {
+  enforceRateLimit,
+  errorResponse,
+  requireSession,
+  type ApiErrorResponse,
+} from '@/lib/api-helpers';
+import { RateLimits } from '@/lib/ratelimit';
 import {
   MessageService,
   ValidationError,
@@ -70,15 +75,6 @@ import {
 export const runtime = 'nodejs';
 /** Disable static optimization — both verbs are session-bound. */
 export const dynamic = 'force-dynamic';
-
-/**
- * Error envelope returned for every non-2xx response. Matches the
- * sibling `/api/channels` and `/api/tasks` routes so clients can treat
- * `{ error: string }` as the universal API error contract.
- */
-interface ApiErrorResponse {
-  error: string;
-}
 
 /**
  * Zod schema for the `POST /api/messages` request body.
@@ -126,50 +122,53 @@ function formatZodError(err: z.ZodError): string {
  * Handle `POST /api/messages`. See module docs for the full contract.
  *
  * Steps:
- *   1. Resolve the NextAuth session; reject with `401` if absent.
- *   2. Parse the request body as JSON, returning `400` on syntax errors.
- *   3. Validate the parsed body against {@link createMessageBodySchema},
+ *   1. Resolve the NextAuth session via {@link requireSession}; reject
+ *      with `401` if absent.
+ *   2. Consume one token from the per-user `messages.write` rate-limit
+ *      bucket; reject with `429` (Retry-After header) on exhaustion.
+ *   3. Parse the request body as JSON, returning `400` on syntax errors.
+ *   4. Validate the parsed body against {@link createMessageBodySchema},
  *      returning `400` on shape / type errors.
- *   4. Delegate to {@link MessageService.create}, which performs the
- *      domain-level checks (non-blank, length cap), persists the row,
- *      and emits `message:new` after a successful commit.
- *   5. Translate {@link ValidationError} to `400`; any other error to
+ *   5. Delegate to {@link MessageService.create}, which performs the
+ *      domain-level checks (non-blank, length cap, channel must belong
+ *      to the active workspace), persists the row, and emits
+ *      `message:new` after a successful commit.
+ *   6. Translate {@link ValidationError} to `400`; any other error to
  *      `500`. The realtime layer is not invoked when persistence fails.
  */
 export async function POST(
   request: Request,
 ): Promise<NextResponse<Message | ApiErrorResponse>> {
   // 1. Auth gate.
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    return NextResponse.json<ApiErrorResponse>(
-      { error: 'Unauthorized' },
-      { status: 401 },
-    );
-  }
+  const session = await requireSession();
+  if (session instanceof NextResponse) return session;
 
-  // 2. Parse JSON body. Malformed JSON → 400 with a clear hint.
+  // 2. Rate limit (audit H2). Chat is bursty by nature so the bucket
+  //    is wider than the generic write limit, but it still bounds
+  //    abuse / runaway clients.
+  const limited = enforceRateLimit(
+    'messages.write',
+    session.user.id,
+    RateLimits.MESSAGE,
+  );
+  if (limited) return limited;
+
+  // 3. Parse JSON body. Malformed JSON → 400 with a clear hint.
   let rawBody: unknown;
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json<ApiErrorResponse>(
-      { error: 'Request body must be valid JSON.' },
-      { status: 400 },
-    );
+    return errorResponse('Request body must be valid JSON.', 400);
   }
 
-  // 3. Schema-validate the body. Shape / type failures → 400.
+  // 4. Schema-validate the body. Shape / type failures → 400.
   const parsed = createMessageBodySchema.safeParse(rawBody);
   if (!parsed.success) {
-    return NextResponse.json<ApiErrorResponse>(
-      { error: formatZodError(parsed.error) },
-      { status: 400 },
-    );
+    return errorResponse(formatZodError(parsed.error), 400);
   }
   const body: CreateMessageRequestBody = parsed.data;
 
-  // 4. Delegate to the service layer. ValidationError → 400; any
+  // 5. Delegate to the service layer. ValidationError → 400; any
   //    other error is treated as an internal failure (no realtime
   //    broadcast has occurred because the service emits only after a
   //    successful commit — see lib/services/message.service.ts).
@@ -192,15 +191,9 @@ export async function POST(
     return NextResponse.json<Message>(message, { status: 201 });
   } catch (err) {
     if (err instanceof ValidationError) {
-      return NextResponse.json<ApiErrorResponse>(
-        { error: err.message },
-        { status: 400 },
-      );
+      return errorResponse(err.message, 400);
     }
-    return NextResponse.json<ApiErrorResponse>(
-      { error: 'Failed to create message.' },
-      { status: 500 },
-    );
+    return errorResponse('Failed to create message.', 500);
   }
 }
 
@@ -216,20 +209,15 @@ export async function GET(
   request: Request,
 ): Promise<NextResponse<Message[] | ApiErrorResponse>> {
   // 1. Auth gate.
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    return NextResponse.json<ApiErrorResponse>(
-      { error: 'Unauthorized' },
-      { status: 401 },
-    );
-  }
+  const session = await requireSession();
+  if (session instanceof NextResponse) return session;
 
   // 2. Validate the `channelId` query param.
   const channelId = new URL(request.url).searchParams.get('channelId');
   if (channelId === null || channelId.length === 0) {
-    return NextResponse.json<ApiErrorResponse>(
-      { error: 'Query parameter "channelId" must be a non-empty string.' },
-      { status: 400 },
+    return errorResponse(
+      'Query parameter "channelId" must be a non-empty string.',
+      400,
     );
   }
 
@@ -241,9 +229,6 @@ export async function GET(
     const messages = await MessageService.listByChannel(channelId);
     return NextResponse.json<Message[]>(messages, { status: 200 });
   } catch {
-    return NextResponse.json<ApiErrorResponse>(
-      { error: 'Failed to load messages.' },
-      { status: 500 },
-    );
+    return errorResponse('Failed to load messages.', 500);
   }
 }

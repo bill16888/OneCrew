@@ -157,6 +157,27 @@ function getCustomSystemPrompt(aiSettings: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+/**
+ * Read a per-AI tool whitelist out of `User.aiSettings.toolSet`.
+ *
+ * Returns `undefined` (i.e. "no whitelist; allow the full surface")
+ * when the field is missing, not an array, or empty after filtering
+ * out non-string entries. The dispatcher treats `undefined` and `[]`
+ * identically — only a non-empty array activates the per-AI guard.
+ *
+ * Validates: closes audit finding C4 ("toolSet stored but never
+ * enforced") by giving the runtime a single, defensive read of the
+ * config the AI-colleague editor persists.
+ */
+function getAllowedTools(aiSettings: unknown): readonly string[] | undefined {
+  const candidate = asRecord(aiSettings).toolSet;
+  if (!Array.isArray(candidate)) return undefined;
+  const cleaned = candidate.filter(
+    (item): item is string => typeof item === 'string' && item.trim().length > 0,
+  );
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
 function getRoleSystemPrompt(aiRole: string | null): string | null {
   if (aiRole === 'Ada' || aiRole === 'Hopper') {
     return SYSTEM_PROMPTS[aiRole];
@@ -436,6 +457,10 @@ export async function runCycle(aiUserId: string): Promise<RunCycleResult> {
     getCustomSystemPrompt(ai.aiSettings) ??
     getRoleSystemPrompt(ai.aiRole) ??
     buildGenericSystemPrompt(ai.name);
+  // Per-AI tool whitelist (audit C4). `undefined` preserves the legacy
+  // full-surface behaviour for seeded Ada/Hopper roles; a non-empty
+  // array constrains custom AIs to the operator-configured subset.
+  const allowedTools = getAllowedTools(ai.aiSettings);
 
   let rounds = 0;
   let finishReason: FinishReason | null = null;
@@ -514,7 +539,7 @@ export async function runCycle(aiUserId: string): Promise<RunCycleResult> {
       const toolResults: ToolResultBlockParam[] = await Promise.all(
         toolUses.map((u) => {
           const call: ToolCall = { id: u.id, name: u.name, input: u.input };
-          return dispatchTool({ aiUserId }, call);
+          return dispatchTool({ aiUserId, allowedTools }, call);
         }),
       );
 

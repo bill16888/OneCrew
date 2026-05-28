@@ -35,6 +35,7 @@ interface AIColleague {
 interface AISettings {
   systemPrompt: string;
   toolSet: string[];
+  mentionAliases: string[];
 }
 
 type DialogMode = 'create' | 'edit';
@@ -44,6 +45,7 @@ interface FormState {
   email: string;
   systemPrompt: string;
   toolSetText: string;
+  mentionAliasesText: string;
 }
 
 const EMPTY_FORM: FormState = {
@@ -51,6 +53,7 @@ const EMPTY_FORM: FormState = {
   email: '',
   systemPrompt: '',
   toolSetText: '',
+  mentionAliasesText: '',
 };
 
 const FALLBACK_TEAMMATES: readonly AIColleague[] = [
@@ -94,10 +97,15 @@ function readAISettings(value: unknown): AISettings {
     toolSet: Array.isArray(record.toolSet)
       ? record.toolSet.filter((item): item is string => typeof item === 'string')
       : [],
+    mentionAliases: Array.isArray(record.mentionAliases)
+      ? record.mentionAliases.filter(
+          (item): item is string => typeof item === 'string',
+        )
+      : [],
   };
 }
 
-function parseToolSet(value: string): string[] {
+function parseList(value: string): string[] {
   return value
     .split(',')
     .map((item) => item.trim())
@@ -111,6 +119,7 @@ function toFormState(ai: AIColleague): FormState {
     email: ai.email,
     systemPrompt: settings.systemPrompt,
     toolSetText: settings.toolSet.join(', '),
+    mentionAliasesText: settings.mentionAliases.join(', '),
   };
 }
 
@@ -198,7 +207,8 @@ export function TeammateManager(): JSX.Element {
     setSubmitting(true);
     setError(null);
 
-    const toolSet = parseToolSet(form.toolSetText);
+    const toolSet = parseList(form.toolSetText);
+    const mentionAliases = parseList(form.mentionAliasesText);
     const payload =
       dialogMode === 'create'
         ? {
@@ -206,11 +216,13 @@ export function TeammateManager(): JSX.Element {
             email: form.email,
             systemPrompt: form.systemPrompt,
             toolSet,
+            mentionAliases,
           }
         : {
             name: form.name,
             systemPrompt: form.systemPrompt,
             toolSet,
+            mentionAliases,
           };
 
     const endpoint =
@@ -471,6 +483,24 @@ export function TeammateManager(): JSX.Element {
                   placeholder="mock_web_search, create_task"
                   className="rounded-md border border-border bg-surface-raised px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/60"
                 />
+                <span className="text-[10px] font-normal text-muted-foreground/70">
+                  留空则允许使用全部工具；填入名称（逗号分隔）后将仅允许这些工具。
+                </span>
+              </label>
+
+              <label className="flex flex-col gap-1.5 text-xs font-medium text-muted-foreground">
+                @ 别名
+                <input
+                  value={form.mentionAliasesText}
+                  onChange={(event) =>
+                    updateForm('mentionAliasesText', event.target.value)
+                  }
+                  placeholder="小林, lin, 林"
+                  className="rounded-md border border-border bg-surface-raised px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/60"
+                />
+                <span className="text-[10px] font-normal text-muted-foreground/70">
+                  额外可触发该 AI 的 @ 提及别名（逗号分隔，大小写不敏感）。
+                </span>
               </label>
 
               {error !== null ? (

@@ -31,6 +31,15 @@ const hoisted = vi.hoisted(() => ({
 
 vi.mock('@/lib/prisma', () => ({
   default: {
+    channel: {
+      // Audit H4 added a workspace boundary check before the message
+      // insert. Mock as a near-zero-cost passthrough so the latency
+      // measurement reflects the actual create→emit gap and not the
+      // synthetic boundary lookup.
+      findFirst: vi.fn(async (args: { where: { id: string } }) => ({
+        id: args.where.id,
+      })),
+    },
     message: {
       create: vi.fn(async (args: { data: { channelId: string; content: string; userId: string } }) => {
         hoisted.dbCommittedAt.value = performance.now();
@@ -48,6 +57,9 @@ vi.mock('@/lib/prisma', () => ({
     },
     task: {
       update: vi.fn(async () => ({})),
+      findFirst: vi.fn(async (args: { where: { taskId: string } }) => ({
+        id: `internal_${args.where.taskId}`,
+      })),
       findMany: vi.fn(async () => []),
     },
     approval: {

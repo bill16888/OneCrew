@@ -39,6 +39,15 @@ const hoisted = vi.hoisted(() => {
 
 vi.mock('@/lib/prisma', () => ({
   default: {
+    channel: {
+      // Workspace boundary check added in audit H4 fix; treat every
+      // channel id as belonging to the active workspace for the
+      // purposes of this test (the broadcast contract is independent
+      // of the boundary check, which has its own coverage).
+      findFirst: vi.fn(async (args: { where: { id: string } }) => ({
+        id: args.where.id,
+      })),
+    },
     message: {
       create: vi.fn(
         async (args: {

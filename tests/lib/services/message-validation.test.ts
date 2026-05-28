@@ -30,6 +30,14 @@ const hoisted = vi.hoisted(() => ({
 
 vi.mock('@/lib/prisma', () => ({
   default: {
+    channel: {
+      // Audit H4 added a workspace boundary check before the insert;
+      // mock it to always return a valid row so the validation tests
+      // exercise the content rules they were written for.
+      findFirst: vi.fn(async (args: { where: { id: string } }) => ({
+        id: args.where.id,
+      })),
+    },
     message: {
       create: hoisted.prismaCreate,
       findMany: vi.fn(async () => []),

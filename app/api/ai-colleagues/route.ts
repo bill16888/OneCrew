@@ -7,21 +7,22 @@
  */
 
 import type { Prisma, User } from '@prisma/client';
-import { getServerSession } from 'next-auth';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
-import { authOptions } from '@/lib/auth/options';
+import {
+  enforceRateLimit,
+  errorResponse,
+  requireSession,
+  type ApiErrorResponse,
+} from '@/lib/api-helpers';
 import prisma from '@/lib/prisma';
+import { RateLimits } from '@/lib/ratelimit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const DEFAULT_WORKSPACE_ID = 'ws_default';
-
-interface ApiErrorResponse {
-  error: string;
-}
 
 const CREATE_AI_COLLEAGUE_BODY = z
   .object({
@@ -29,6 +30,18 @@ const CREATE_AI_COLLEAGUE_BODY = z
     email: z.string().trim().email().max(254),
     systemPrompt: z.string().trim().max(12_000).optional(),
     toolSet: z.array(z.string().trim().min(1).max(80)).max(30).optional(),
+    /**
+     * Additional `@`-mention aliases this AI should respond to. Each
+     * entry is matched case-insensitively against the bare name after
+     * the `@` sigil. Useful for Chinese / nickname forms of an AI's
+     * English name (e.g. `["小林", "lin"]`). Maps to
+     * `aiSettings.mentionAliases` and is consumed by
+     * `MessageService.wakeMentionedAIs`.
+     */
+    mentionAliases: z
+      .array(z.string().trim().min(1).max(80))
+      .max(20)
+      .optional(),
   })
   .strict();
 
@@ -47,7 +60,10 @@ function formatZodError(err: z.ZodError): string {
 }
 
 function buildAISettings(
-  input: Pick<CreateAIColleagueBody, 'name' | 'systemPrompt' | 'toolSet'>,
+  input: Pick<
+    CreateAIColleagueBody,
+    'name' | 'systemPrompt' | 'toolSet' | 'mentionAliases'
+  >,
 ): Prisma.InputJsonObject {
   return {
     systemPrompt:
@@ -60,6 +76,7 @@ function buildAISettings(
             'For production changes, external communication, destructive actions, or other high-risk work, call request_approval before taking action.',
           ].join('\n'),
     toolSet: input.toolSet ?? [],
+    mentionAliases: input.mentionAliases ?? [],
     avatarUrl: null,
   };
 }
@@ -73,22 +90,15 @@ function isUniqueViolation(err: unknown): boolean {
   );
 }
 
-async function requireSession(): Promise<true | NextResponse<ApiErrorResponse>> {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    return NextResponse.json<ApiErrorResponse>(
-      { error: 'Unauthorized' },
-      { status: 401 },
-    );
-  }
-  return true;
+async function requireAuthenticatedSession() {
+  return requireSession();
 }
 
 export async function GET(): Promise<
   NextResponse<User[] | ApiErrorResponse>
 > {
-  const session = await requireSession();
-  if (session !== true) return session;
+  const session = await requireAuthenticatedSession();
+  if (session instanceof NextResponse) return session;
 
   try {
     const colleagues = await prisma.user.findMany({
@@ -97,35 +107,33 @@ export async function GET(): Promise<
     });
     return NextResponse.json<User[]>(colleagues, { status: 200 });
   } catch {
-    return NextResponse.json<ApiErrorResponse>(
-      { error: 'Failed to load AI colleagues.' },
-      { status: 500 },
-    );
+    return errorResponse('Failed to load AI colleagues.', 500);
   }
 }
 
 export async function POST(
   request: Request,
 ): Promise<NextResponse<User | ApiErrorResponse>> {
-  const session = await requireSession();
-  if (session !== true) return session;
+  const session = await requireAuthenticatedSession();
+  if (session instanceof NextResponse) return session;
+
+  const limited = enforceRateLimit(
+    'ai-colleagues.write',
+    session.user.id,
+    RateLimits.WRITE,
+  );
+  if (limited) return limited;
 
   let rawBody: unknown;
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json<ApiErrorResponse>(
-      { error: 'Request body must be valid JSON.' },
-      { status: 400 },
-    );
+    return errorResponse('Request body must be valid JSON.', 400);
   }
 
   const parsed = CREATE_AI_COLLEAGUE_BODY.safeParse(rawBody);
   if (!parsed.success) {
-    return NextResponse.json<ApiErrorResponse>(
-      { error: formatZodError(parsed.error) },
-      { status: 400 },
-    );
+    return errorResponse(formatZodError(parsed.error), 400);
   }
 
   try {
@@ -144,14 +152,8 @@ export async function POST(
     return NextResponse.json<User>(colleague, { status: 201 });
   } catch (err) {
     if (isUniqueViolation(err)) {
-      return NextResponse.json<ApiErrorResponse>(
-        { error: 'Email is already in use.' },
-        { status: 409 },
-      );
+      return errorResponse('Email is already in use.', 409);
     }
-    return NextResponse.json<ApiErrorResponse>(
-      { error: 'Failed to create AI colleague.' },
-      { status: 500 },
-    );
+    return errorResponse('Failed to create AI colleague.', 500);
   }
 }
