@@ -172,9 +172,13 @@ function listMigrationDirs(): string[] {
  *   should only be used for greenfield bootstraps.
  * - Otherwise run `prisma migrate deploy`. If the database is non-
  *   empty but has no migration history yet (Prisma error `P3005`,
- *   typical of a DB previously managed by `db push`), automatically
- *   baseline by marking every existing migration as applied and
- *   retry `migrate deploy` — which then becomes a no-op.
+ *   typical of a DB previously managed by `db push`), check whether
+ *   the operator has explicitly opted in to baselining via
+ *   `PRISMA_BASELINE_MIGRATIONS=<comma-separated names>`. If so, mark
+ *   ONLY those migrations as already-applied and retry. The earlier
+ *   "auto-baseline every directory" behaviour silently swallowed any
+ *   newer migration shipped at the same time, leading to a schema
+ *   drift that is hard to detect at 3 a.m. (audit follow-up to PR #1).
  */
 async function applySchema(): Promise<void> {
   const strategy = (nonEmptyEnv('PRISMA_DEPLOY_STRATEGY') ?? 'migrate').toLowerCase();
@@ -200,22 +204,46 @@ async function applySchema(): Promise<void> {
   const combined = `${result.stdout}\n${result.stderr}`;
 
   // P3005: "The database schema is not empty" — typical of a DB
-  // previously managed by `db push`. Auto-baseline so the migration
-  // history matches reality, then retry deploy.
+  // previously managed by `db push`. We refuse to silently mark every
+  // local migration as applied because that path will skip a real
+  // schema-changing migration shipped at the same time as the cutover.
+  // Operators must explicitly list the migrations they know are
+  // already applied via `PRISMA_BASELINE_MIGRATIONS`.
   if (combined.includes('P3005')) {
-    console.warn(
-      '==> P3005 detected: database has existing schema but no migration history',
-    );
-    const migrations = listMigrationDirs();
-    if (migrations.length === 0) {
+    const baselineEnv = nonEmptyEnv('PRISMA_BASELINE_MIGRATIONS');
+    if (!baselineEnv) {
       throw new Error(
-        'P3005 received but no migration directories were found under prisma/migrations.',
+        [
+          'prisma migrate deploy returned P3005 (database schema is not empty,',
+          'but the migration history is also empty). This deployment was probably',
+          'managed by `db push` previously. To recover, set',
+          '`PRISMA_BASELINE_MIGRATIONS=<comma-separated migration directory names',
+          'whose schema is ALREADY in the database>` for ONE deploy, then unset.',
+          'Check `prisma/migrations/` for the directory names. Listing migrations',
+          'that have NOT actually been applied will mark them applied without',
+          'running them, leading to silent schema drift — only list ones already',
+          'reflected in the live schema.',
+        ].join(' '),
       );
     }
+
+    const requested = baselineEnv
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    const known = new Set(listMigrationDirs());
+    const unknown = requested.filter((name) => !known.has(name));
+    if (unknown.length > 0) {
+      throw new Error(
+        `PRISMA_BASELINE_MIGRATIONS contains unknown migration directory names: ${unknown.join(', ')}. ` +
+          `Known directories: ${[...known].join(', ') || '(none)'}.`,
+      );
+    }
+
     console.warn(
-      `==> baselining ${migrations.length} migration(s) as already-applied: ${migrations.join(', ')}`,
+      `==> baselining ${requested.length} explicitly-listed migration(s): ${requested.join(', ')}`,
     );
-    for (const name of migrations) {
+    for (const name of requested) {
       await run('npx', ['prisma', 'migrate', 'resolve', '--applied', name]);
     }
     console.log('==> retrying prisma migrate deploy after baselining');

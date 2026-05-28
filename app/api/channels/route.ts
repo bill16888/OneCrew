@@ -31,28 +31,12 @@ import { NextResponse } from 'next/server';
 
 import { authOptions } from '@/lib/auth/options';
 import { ChannelService } from '@/lib/services/channel.service';
+import { resolveWorkspaceId } from '@/lib/workspace';
 
 /** Always run this route on the Node.js runtime (Prisma needs Node APIs). */
 export const runtime = 'nodejs';
 /** Disable static optimization — this is a session-bound, DB-backed read. */
 export const dynamic = 'force-dynamic';
-
-/**
- * Default workspace identifier used when `process.env.WORKSPACE_ID` is
- * unset. Mirrors the single-workspace MVP assumption (Requirement 1.7)
- * and is kept aligned with `lib/realtime/io.ts` and `prisma/seed.ts`.
- */
-const DEFAULT_WORKSPACE_ID = 'ws_default';
-
-/**
- * Resolve the active workspace id from the environment, falling back to
- * {@link DEFAULT_WORKSPACE_ID}. Read lazily (per request) so deployments
- * can hot-swap the env var without rebuilding.
- */
-function resolveWorkspaceId(): string {
-  const fromEnv = process.env.WORKSPACE_ID;
-  return fromEnv && fromEnv.length > 0 ? fromEnv : DEFAULT_WORKSPACE_ID;
-}
 
 /**
  * Handle `GET /api/channels`. See module docs for the full contract.

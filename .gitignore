@@ -39,3 +39,6 @@ next-env.d.ts.bak
 playwright-report/
 test-results/
 playwright/.cache/
+
+# Local-only artefacts
+semantic-review/
