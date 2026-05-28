@@ -1,10 +1,16 @@
 name: Deploy to Railway
 
 # Auto-deploy main pushes to Railway. This workflow assumes the CI
-# workflow above has already run on the same commit (GitHub Actions
-# runs both in parallel by default). For strict ordering, gate this
-# job on `needs: [check]` referring to the CI job from `ci.yml` once
-# the workflows are unified.
+# workflow has already run on the same commit (GitHub Actions runs
+# both in parallel by default). For strict ordering, gate this job
+# on `needs: [check]` referring to the CI job from `ci.yml` once the
+# workflows are unified.
+#
+# The deploy step is GATED on `RAILWAY_TOKEN` being set in repo
+# secrets. Without it, the workflow still runs (so the merge UI
+# shows a green check) but the deploy step is skipped with an
+# explanatory log line — instead of executing `railway up` against
+# an empty token and failing the whole workflow.
 
 on:
   push:
@@ -15,26 +21,37 @@ jobs:
     name: Railway Deploy
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # Skip the deploy when RAILWAY_TOKEN is not configured (local fork
-    # PRs or before the first secret is added). The job still runs but
-    # the actual deploy step is gated below.
     if: github.repository_owner != ''
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Check Railway token presence
+        id: token-check
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          if [ -n "$RAILWAY_TOKEN" ]; then
+            echo "has_token=true" >> "$GITHUB_OUTPUT"
+            echo "RAILWAY_TOKEN is configured; will run deploy."
+          else
+            echo "has_token=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::RAILWAY_TOKEN secret is not set — skipping deploy. Set it in repo Settings → Secrets and Variables → Actions to enable auto-deploy."
+          fi
+
       - name: Set up Node 20
+        if: steps.token-check.outputs.has_token == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
       - name: Install Railway CLI
+        if: steps.token-check.outputs.has_token == 'true'
         run: npm install --global @railway/cli
 
       - name: Deploy
+        if: steps.token-check.outputs.has_token == 'true'
         env:
           # Provided via repo Settings → Secrets → Actions.
-          # Without it the CLI prints an error and exits non-zero,
-          # which surfaces here as a failed deploy step (intentional).
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: railway up --detach
