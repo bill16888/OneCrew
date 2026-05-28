@@ -415,7 +415,6 @@ export function TeammateManager(): JSX.Element {
                 <DialogPrimitive.Description className="sr-only">
                   Manage AI teammate settings.
                 </DialogPrimitive.Description>
-                </DialogPrimitive.Description>
               </div>
               <DialogPrimitive.Close
                 aria-label="Close"
@@ -492,8 +491,6 @@ export function TeammateManager(): JSX.Element {
                   >
                     <X className="h-4 w-4" aria-hidden />
                     取消
-                  </button>
-                </DialogPrimitive.Close>
                   </button>
                 </DialogPrimitive.Close>
                 <button
