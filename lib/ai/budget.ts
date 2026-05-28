@@ -204,10 +204,14 @@ export class Budget {
   /**
    * Roll the running tally over to a new UTC day if necessary.
    *
-   * Called at the top of every public mutator. We compare against the
-   * cached `resetAt` so the reset point stays stable within a day; on
-   * crossing it we move `resetAt` to the next UTC midnight relative to
-   * the current clock.
+   * Called at the top of every public mutator AND every read. We
+   * compare against the cached `resetAt` so the reset point stays
+   * stable within a day; on crossing it we move `resetAt` to the next
+   * UTC midnight relative to the current clock and zero the running
+   * total. Calling this from `getStats` and `shouldPauseCycle` (not
+   * just `track`) closes the deadlock where `shouldPauseCycle`
+   * latches `true` past midnight because nothing rolls the day over
+   * while the gate is held (audit follow-up to M1).
    */
   private rolloverIfNeeded(now: Date): void {
     if (now.getTime() >= this.resetAt.getTime()) {
@@ -249,11 +253,15 @@ export class Budget {
 
   /**
    * Return a JSON-safe snapshot of today's spend, the configured limit,
-   * and the next UTC reset point. This call is non-mutating: it does
-   * NOT roll the window over, so a long-running observer still sees
-   * the previous day's final tally until the next `track()`.
+   * and the next UTC reset point.
+   *
+   * Calls {@link rolloverIfNeeded} before reading so a long-lived
+   * observer (e.g. `/api/admin/budget`) sees the new day's zero rather
+   * than yesterday's terminal value once the clock crosses UTC
+   * midnight (audit follow-up to M1).
    */
   getStats(): BudgetStats {
+    this.rolloverIfNeeded(new Date());
     return {
       todayUSD: this.todayUSD,
       limitUSD: env.AI_DAILY_BUDGET_USD,
@@ -275,11 +283,15 @@ export class Budget {
    * Always returns `false` when the daily limit is non-positive
    * (treated as "budgeting disabled").
    *
-   * @param safetyPercent Fraction of the daily limit that triggers
-   *   pre-emptive pause. Must be in `(0, 1]`; clamped to `0.5..1` to
-   *   avoid pathological misconfiguration.
+   * Calls {@link rolloverIfNeeded} before reading so the gate releases
+   * automatically at the next UTC midnight even if no `track` call has
+   * fired since the previous day's overshoot. Without this rollover,
+   * a busy day that crosses 95% latches the gate forever because
+   * `track` (the only other roller) never runs while the gate holds —
+   * the original M1 fix had this deadlock; this read closes it.
    */
   shouldPauseCycle(safetyPercent = 0.95): boolean {
+    this.rolloverIfNeeded(new Date());
     const limit = env.AI_DAILY_BUDGET_USD;
     if (!Number.isFinite(limit) || limit <= 0) return false;
     const clamped = Math.min(1, Math.max(0.5, safetyPercent));

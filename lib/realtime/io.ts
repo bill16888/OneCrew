@@ -40,6 +40,7 @@ import { parseCookieHeader, readChunkedCookie } from '@/lib/cookie-parser';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
 import prisma from '@/lib/prisma';
+import { resolveWorkspaceId } from '@/lib/workspace';
 
 import type {
   ClientToServerEvents,
@@ -47,22 +48,6 @@ import type {
   ServerToClientEvents,
   SocketData,
 } from './events';
-
-/**
- * Default workspace identifier used when `process.env.WORKSPACE_ID` is unset.
- * Mirrors the single-workspace MVP assumption (requirements.md §1.7).
- */
-const DEFAULT_WORKSPACE_ID = 'ws_default';
-
-/**
- * Resolve the active workspace id from the environment, falling back to
- * {@link DEFAULT_WORKSPACE_ID}. Read lazily (per call) so test setups can
- * mutate `process.env.WORKSPACE_ID` between server constructions.
- */
-function resolveWorkspaceId(): string {
-  const fromEnv = process.env.WORKSPACE_ID;
-  return fromEnv && fromEnv.length > 0 ? fromEnv : DEFAULT_WORKSPACE_ID;
-}
 
 /**
  * Resolve the NextAuth JWT secret from the validated environment. The

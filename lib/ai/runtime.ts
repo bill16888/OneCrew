@@ -54,6 +54,7 @@ import { EVENTS } from '@/lib/realtime/events';
 import { getIO } from '@/lib/realtime/io';
 import { ChannelService } from '@/lib/services/channel.service';
 import { MessageService } from '@/lib/services/message.service';
+import { resolveWorkspaceId } from '@/lib/workspace';
 
 import { MODEL, callAnthropicWithRetry } from './anthropic';
 import { BUDGET_EXCEEDED_CODE, budget } from './budget';
@@ -108,15 +109,6 @@ const MAX_OUTPUT_TOKENS = 1024;
  */
 
 /**
- * Default workspace identifier used when `process.env.WORKSPACE_ID` is
- * unset. Mirrors the single-workspace MVP assumption (requirements.md
- * §1.7) and keeps this module aligned with `lib/realtime/io.ts`,
- * `lib/services/task.service.ts`, `lib/services/approval.service.ts`,
- * and `prisma/seed.ts`.
- */
-const DEFAULT_WORKSPACE_ID = 'ws_default';
-
-/**
  * Lookback window for the channel digest injected as the cycle's
  * initial user message: the runtime considers messages created within
  * the last `RECENT_MESSAGE_LOOKBACK_MS` ms.
@@ -128,16 +120,6 @@ const RECENT_MESSAGE_LOOKBACK_MS = 5 * 60 * 1000;
  * Keeps the initial context bounded even on busy channels.
  */
 const RECENT_MESSAGE_LIMIT = 50;
-
-/**
- * Resolve the active workspace id from the environment, falling back
- * to {@link DEFAULT_WORKSPACE_ID}. Read lazily (per call) so test
- * harnesses can mutate `process.env.WORKSPACE_ID` between invocations.
- */
-function resolveWorkspaceId(): string {
-  const fromEnv = process.env.WORKSPACE_ID;
-  return fromEnv && fromEnv.length > 0 ? fromEnv : DEFAULT_WORKSPACE_ID;
-}
 
 function asRecord(value: unknown): Record<string, unknown> {
   if (

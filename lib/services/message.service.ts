@@ -356,24 +356,35 @@ async function wakeMentionedAIs(
   }
   if (mentions.size === 0) return;
 
-  // Rate-limit @-mentions per sender so a paste of AI-authored text
-  // (or a runaway client) cannot spam wakeups. We consume one token
-  // per mention so a single message with N mentions costs N tokens
-  // rather than 1; that keeps the bucket meaningful even when the
-  // user crafts one giant message instead of many small ones.
-  const verdict = rateLimit('messages.mentions', senderId, MENTION_LIMIT);
-  if (!verdict.ok) {
+  // Rate-limit @-mentions per sender. We consume one token PER
+  // mention so a single message with N mentions costs N tokens — this
+  // keeps the bucket meaningful even when the user crafts one giant
+  // message instead of many small ones (audit follow-up to M3). The
+  // earlier "one bucket call per message" implementation made the cap
+  // 30 messages/min × N mentions/msg, which contradicted the inline
+  // contract and let runaway clients blast every AI in one paste.
+  let throttledMentions = 0;
+  const allowedMentions = new Set<string>();
+  for (const mention of mentions) {
+    const verdict = rateLimit('messages.mentions', senderId, MENTION_LIMIT);
+    if (verdict.ok) {
+      allowedMentions.add(mention);
+    } else {
+      throttledMentions++;
+    }
+  }
+  if (throttledMentions > 0) {
     logger.warn(
       {
         event: 'mention_wakeup_throttled',
         senderId,
         mentionCount: mentions.size,
-        retryAfterMs: verdict.retryAfterMs,
+        throttledCount: throttledMentions,
       },
-      'Mention wakeup rate limit hit; skipping wakeups for this message',
+      'Mention wakeup rate limit hit; some wakeups dropped',
     );
-    return;
   }
+  if (allowedMentions.size === 0) return;
 
   const aiUsers = await prisma.user.findMany({
     where: { isAI: true, aiStatus: 'active' },
@@ -385,7 +396,9 @@ async function wakeMentionedAIs(
     const baseAliases = MENTION_ALIASES[englishName] ?? [englishName];
     const customAliases = extractCustomMentionAliases(ai.aiSettings);
     const aliases = new Set<string>([...baseAliases, ...customAliases, englishName]);
-    const matched = Array.from(aliases).some((alias) => mentions.has(alias));
+    const matched = Array.from(aliases).some((alias) =>
+      allowedMentions.has(alias),
+    );
     if (matched) {
       // Diagnostic: emitter singletons can drift when imported from
       // different bundle realms (next build worker vs custom server),

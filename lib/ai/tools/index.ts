@@ -410,17 +410,32 @@ function inferApprovalRiskLevel(
 ): ApprovalRiskLevel {
   // Try to serialise the payload so risk-level keywords inside nested
   // fields (e.g. `payload.target = 'production-db'`) participate in the
-  // matcher below. A cyclic payload makes JSON.stringify throw; in that
-  // case we conservatively bump the implicit risk floor — a model that
-  // produces a self-referencing object is already misbehaving, and we
-  // would rather route it through human review than silently classify
-  // as low.
+  // matcher below. A cyclic payload makes JSON.stringify throw; in
+  // that case we short-circuit to `'high'` BEFORE any keyword matcher
+  // runs (audit follow-up to PR #3). A model that produces a self-
+  // referencing tool input is already misbehaving; routing the result
+  // through human review beats trusting partial keyword matches on
+  // an action / reason that may have been generated under the same
+  // anomaly.
   let serializedPayload = '';
-  let payloadSerializationFailed = false;
   try {
     serializedPayload = JSON.stringify(payload ?? {});
   } catch {
-    payloadSerializationFailed = true;
+    // Surface the anomaly to ops. The function is otherwise pure and
+    // the audit calls out that this branch was previously invisible
+    // (no log, no Sentry capture). `console.warn` with a structured
+    // payload is the smallest hammer that lights this up in pino /
+    // CloudWatch / Sentry breadcrumbs without pulling the logger
+    // import into a hot synchronous helper.
+    // eslint-disable-next-line no-console
+    console.warn(
+      JSON.stringify({
+        event: 'approval_payload_cyclic',
+        action,
+        reason,
+      }),
+    );
+    return 'high';
   }
 
   const text = `${action} ${reason} ${serializedPayload}`.toLowerCase();
@@ -442,10 +457,7 @@ function inferApprovalRiskLevel(
   if (/public|notify|send|message|公开|通知|发送/.test(text)) {
     return 'medium';
   }
-  // Audit nit L8: cyclic payload → escalate the floor from medium to
-  // high so the human reviewer sees the risk surface, not a misleading
-  // "looks fine" assignment.
-  return payloadSerializationFailed ? 'high' : 'medium';
+  return 'medium';
 }
 
 function normalizeApprovalAnalysis({
