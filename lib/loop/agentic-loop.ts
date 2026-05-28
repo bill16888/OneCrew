@@ -56,6 +56,7 @@
 import { AIRuntime } from '@/lib/ai/runtime';
 import { BUDGET_EXCEEDED_CODE, budget } from '@/lib/ai/budget';
 import { env } from '@/lib/env';
+import { logger } from '@/lib/logger';
 import { agenticEmitter } from '@/lib/loop/emitter';
 import prisma from '@/lib/prisma';
 import type { AppIOServer } from '@/lib/realtime/io';
@@ -121,27 +122,24 @@ let wakeupListener: ((aiUserId: string) => void) | null = null;
 /**
  * Structured-error logger used for both tick-level and per-AI failures.
  *
- * The MVP uses `console.error` so the loop stays self-contained; task
- * 11.3 swaps in the real pino logger. The shape of the logged record
- * (`event`, `aiUserId`, `error`) matches the conventions established by
- * `lib/ai/runtime.ts` so log aggregators can correlate cycle failures
- * with the surrounding tick.
+ * Routes through the shared pino instance so this loop participates in
+ * the same structured stream as service-layer errors and the AI runtime
+ * cycle summary. Including a separate `event` field on every record
+ * lets log aggregators index Agentic Loop failures distinctly from
+ * other parts of the codebase.
  */
 function logLoopError(
   event: 'agentic_tick_error' | 'agentic_run_for_ai_error',
   err: unknown,
   aiUserId?: string,
 ): void {
-  const message = err instanceof Error ? err.message : String(err);
-  const stack = err instanceof Error ? err.stack : undefined;
-  // eslint-disable-next-line no-console
-  console.error(
-    JSON.stringify({
+  logger.error(
+    {
       event,
       ...(aiUserId !== undefined ? { aiUserId } : {}),
-      error: message,
-      ...(stack !== undefined ? { stack } : {}),
-    }),
+      err,
+    },
+    'Agentic loop error',
   );
 }
 
@@ -340,21 +338,14 @@ function start(io: AppIOServer): void {
     timer = setInterval(() => {
       void tick();
     }, intervalMs);
-    // eslint-disable-next-line no-console
-    console.info(
-      JSON.stringify({
-        event: 'agentic_loop_started',
-        mode: 'auto_tick',
-        intervalMs,
-      }),
+    logger.info(
+      { event: 'agentic_loop_started', mode: 'auto_tick', intervalMs },
+      'Agentic loop started',
     );
   } else {
-    // eslint-disable-next-line no-console
-    console.info(
-      JSON.stringify({
-        event: 'agentic_loop_started',
-        mode: 'on_mention_only',
-      }),
+    logger.info(
+      { event: 'agentic_loop_started', mode: 'on_mention_only' },
+      'Agentic loop started in mention-only mode',
     );
   }
 
@@ -368,9 +359,9 @@ function start(io: AppIOServer): void {
     // correlate with `mention_wakeup_emit` log lines on the producer
     // side (`MessageService.create`) and confirm the singleton is
     // actually shared.
-    // eslint-disable-next-line no-console
-    console.info(
-      JSON.stringify({ event: 'agentic_wakeup_received', aiUserId }),
+    logger.info(
+      { event: 'agentic_wakeup_received', aiUserId },
+      'Agentic wakeup received',
     );
     // Fire-and-forget: `runForAI` never throws, so we don't need to
     // attach an extra `.catch`. The leading `void` makes the discard
@@ -378,12 +369,12 @@ function start(io: AppIOServer): void {
     void runForAI(aiUserId);
   };
   agenticEmitter.on('wakeup', wakeupListener);
-  // eslint-disable-next-line no-console
-  console.info(
-    JSON.stringify({
+  logger.info(
+    {
       event: 'agentic_wakeup_listener_attached',
       listenerCount: agenticEmitter.listenerCount('wakeup'),
-    }),
+    },
+    'Agentic wakeup listener attached',
   );
 }
 

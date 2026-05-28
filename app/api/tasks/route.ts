@@ -27,26 +27,22 @@
  */
 
 import type { Task } from '@prisma/client';
-import { getServerSession } from 'next-auth';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
-import { authOptions } from '@/lib/auth/options';
+import {
+  enforceRateLimit,
+  errorResponse,
+  requireSession,
+  type ApiErrorResponse,
+} from '@/lib/api-helpers';
+import { RateLimits } from '@/lib/ratelimit';
 import { TaskService } from '@/lib/services/task.service';
 
 /** Always run this route on the Node.js runtime (Prisma needs Node APIs). */
 export const runtime = 'nodejs';
 /** Disable static optimization — the response is session-bound. */
 export const dynamic = 'force-dynamic';
-
-/**
- * Error envelope returned for every non-2xx response. Matches the shape
- * used by the sibling `POST /api/messages` route so clients can treat
- * `{ error: string }` as the universal API error contract.
- */
-interface ApiErrorResponse {
-  error: string;
-}
 
 /**
  * Handle `GET /api/tasks`. See module docs for the full contract.
@@ -58,13 +54,8 @@ export async function GET(): Promise<
   NextResponse<Task[] | ApiErrorResponse>
 > {
   // 1. Auth gate. Without a session we refuse to disclose any task data.
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    return NextResponse.json<ApiErrorResponse>(
-      { error: 'Unauthorized' },
-      { status: 401 },
-    );
-  }
+  const session = await requireSession();
+  if (session instanceof NextResponse) return session;
 
   // 2. Delegate to the service layer. Date fields on the returned rows
   //    are serialized to ISO 8601 strings by NextResponse.json, which
@@ -73,10 +64,7 @@ export async function GET(): Promise<
     const tasks = await TaskService.list();
     return NextResponse.json<Task[]>(tasks, { status: 200 });
   } catch {
-    return NextResponse.json<ApiErrorResponse>(
-      { error: 'Failed to load tasks.' },
-      { status: 500 },
-    );
+    return errorResponse('Failed to load tasks.', 500);
   }
 }
 
@@ -103,11 +91,13 @@ const CREATE_TASK_BODY = z.object({
  * Contract:
  *   - Method: `POST`
  *   - Auth: requires a valid NextAuth session.
+ *   - Rate limit: per-user write bucket (audit H2).
  *   - Body: `{ title: string, description?: string, assigneeId?: string }`
  *   - Responses:
  *     - `201 Task` on success.
  *     - `400 { error }` when the JSON body is malformed or fails Zod.
  *     - `401 { error }` when the request has no NextAuth session.
+ *     - `429 { error }` when the per-user write bucket is exhausted.
  *     - `500 { error }` for unexpected persistence failures.
  *
  * The realtime broadcast (`task:updated`) is emitted by
@@ -117,13 +107,15 @@ const CREATE_TASK_BODY = z.object({
 export async function POST(
   request: Request,
 ): Promise<NextResponse<Task | ApiErrorResponse>> {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    return NextResponse.json<ApiErrorResponse>(
-      { error: 'Unauthorized' },
-      { status: 401 },
-    );
-  }
+  const session = await requireSession();
+  if (session instanceof NextResponse) return session;
+
+  const limited = enforceRateLimit(
+    'tasks.write',
+    session.user.id,
+    RateLimits.WRITE,
+  );
+  if (limited) return limited;
 
   // Parse + validate the JSON body. Treat any parse / schema failure as
   // a 400 so the client can surface a friendly error message in the
@@ -133,18 +125,15 @@ export async function POST(
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json<ApiErrorResponse>(
-      { error: 'Invalid JSON body.' },
-      { status: 400 },
-    );
+    return errorResponse('Invalid JSON body.', 400);
   }
   const parsed = CREATE_TASK_BODY.safeParse(body);
   if (!parsed.success) {
     const first = parsed.error.issues[0];
     const path = first?.path.join('.') || '(body)';
-    return NextResponse.json<ApiErrorResponse>(
-      { error: `Invalid ${path}: ${first?.message ?? 'unknown error'}` },
-      { status: 400 },
+    return errorResponse(
+      `Invalid ${path}: ${first?.message ?? 'unknown error'}`,
+      400,
     );
   }
 
@@ -157,9 +146,6 @@ export async function POST(
     });
     return NextResponse.json<Task>(task, { status: 201 });
   } catch {
-    return NextResponse.json<ApiErrorResponse>(
-      { error: 'Failed to create task.' },
-      { status: 500 },
-    );
+    return errorResponse('Failed to create task.', 500);
   }
 }

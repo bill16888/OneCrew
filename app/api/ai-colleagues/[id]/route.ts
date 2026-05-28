@@ -6,21 +6,22 @@
  */
 
 import type { Prisma, User } from '@prisma/client';
-import { getServerSession } from 'next-auth';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
-import { authOptions } from '@/lib/auth/options';
+import {
+  enforceRateLimit,
+  errorResponse,
+  requireSession,
+  type ApiErrorResponse,
+} from '@/lib/api-helpers';
 import prisma from '@/lib/prisma';
+import { RateLimits } from '@/lib/ratelimit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const DEFAULT_WORKSPACE_ID = 'ws_default';
-
-interface ApiErrorResponse {
-  error: string;
-}
 
 interface RouteProps {
   params: { id: string };
@@ -31,6 +32,15 @@ const PATCH_AI_COLLEAGUE_BODY = z
     name: z.string().trim().min(1).max(80).optional(),
     systemPrompt: z.string().trim().max(12_000).optional(),
     toolSet: z.array(z.string().trim().min(1).max(80)).max(30).optional(),
+    /**
+     * See the create handler — additional `@`-mention aliases for this
+     * AI. Validated identically; `[]` clears all custom aliases while
+     * leaving the seed aliases (Ada/Hopper) untouched.
+     */
+    mentionAliases: z
+      .array(z.string().trim().min(1).max(80))
+      .max(20)
+      .optional(),
     aiStatus: z.enum(['active', 'inactive']).optional(),
   })
   .strict()
@@ -39,6 +49,7 @@ const PATCH_AI_COLLEAGUE_BODY = z
       value.name !== undefined ||
       value.systemPrompt !== undefined ||
       value.toolSet !== undefined ||
+      value.mentionAliases !== undefined ||
       value.aiStatus !== undefined,
     { message: 'At least one editable field is required.' },
   );
@@ -71,9 +82,16 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function mergeAISettings(
   current: unknown,
-  patch: Pick<PatchAIColleagueBody, 'systemPrompt' | 'toolSet'>,
+  patch: Pick<
+    PatchAIColleagueBody,
+    'systemPrompt' | 'toolSet' | 'mentionAliases'
+  >,
 ): Prisma.InputJsonObject | undefined {
-  if (patch.systemPrompt === undefined && patch.toolSet === undefined) {
+  if (
+    patch.systemPrompt === undefined &&
+    patch.toolSet === undefined &&
+    patch.mentionAliases === undefined
+  ) {
     return undefined;
   }
 
@@ -89,19 +107,18 @@ function mergeAISettings(
         : Array.isArray(currentRecord.toolSet)
           ? currentRecord.toolSet
           : [],
+    mentionAliases:
+      patch.mentionAliases !== undefined
+        ? patch.mentionAliases
+        : Array.isArray(currentRecord.mentionAliases)
+          ? currentRecord.mentionAliases
+          : [],
     avatarUrl: currentRecord.avatarUrl ?? null,
   };
 }
 
-async function requireSession(): Promise<true | NextResponse<ApiErrorResponse>> {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    return NextResponse.json<ApiErrorResponse>(
-      { error: 'Unauthorized' },
-      { status: 401 },
-    );
-  }
-  return true;
+async function requireAuthenticatedSession() {
+  return requireSession();
 }
 
 async function findAIColleague(id: string): Promise<User | null> {
@@ -118,33 +135,31 @@ export async function PATCH(
   request: Request,
   { params }: RouteProps,
 ): Promise<NextResponse<User | ApiErrorResponse>> {
-  const session = await requireSession();
-  if (session !== true) return session;
+  const session = await requireAuthenticatedSession();
+  if (session instanceof NextResponse) return session;
+
+  const limited = enforceRateLimit(
+    'ai-colleagues.write',
+    session.user.id,
+    RateLimits.WRITE,
+  );
+  if (limited) return limited;
 
   let rawBody: unknown;
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json<ApiErrorResponse>(
-      { error: 'Request body must be valid JSON.' },
-      { status: 400 },
-    );
+    return errorResponse('Request body must be valid JSON.', 400);
   }
 
   const parsed = PATCH_AI_COLLEAGUE_BODY.safeParse(rawBody);
   if (!parsed.success) {
-    return NextResponse.json<ApiErrorResponse>(
-      { error: formatZodError(parsed.error) },
-      { status: 400 },
-    );
+    return errorResponse(formatZodError(parsed.error), 400);
   }
 
   const existing = await findAIColleague(params.id);
   if (!existing) {
-    return NextResponse.json<ApiErrorResponse>(
-      { error: 'AI colleague not found.' },
-      { status: 404 },
-    );
+    return errorResponse('AI colleague not found.', 404);
   }
 
   const aiSettings = mergeAISettings(existing.aiSettings, parsed.data);
@@ -161,10 +176,7 @@ export async function PATCH(
     });
     return NextResponse.json<User>(colleague, { status: 200 });
   } catch {
-    return NextResponse.json<ApiErrorResponse>(
-      { error: 'Failed to update AI colleague.' },
-      { status: 500 },
-    );
+    return errorResponse('Failed to update AI colleague.', 500);
   }
 }
 
@@ -172,15 +184,19 @@ export async function DELETE(
   _request: Request,
   { params }: RouteProps,
 ): Promise<NextResponse<User | ApiErrorResponse>> {
-  const session = await requireSession();
-  if (session !== true) return session;
+  const session = await requireAuthenticatedSession();
+  if (session instanceof NextResponse) return session;
+
+  const limited = enforceRateLimit(
+    'ai-colleagues.write',
+    session.user.id,
+    RateLimits.WRITE,
+  );
+  if (limited) return limited;
 
   const existing = await findAIColleague(params.id);
   if (!existing) {
-    return NextResponse.json<ApiErrorResponse>(
-      { error: 'AI colleague not found.' },
-      { status: 404 },
-    );
+    return errorResponse('AI colleague not found.', 404);
   }
 
   try {
@@ -190,9 +206,6 @@ export async function DELETE(
     });
     return NextResponse.json<User>(colleague, { status: 200 });
   } catch {
-    return NextResponse.json<ApiErrorResponse>(
-      { error: 'Failed to deactivate AI colleague.' },
-      { status: 500 },
-    );
+    return errorResponse('Failed to deactivate AI colleague.', 500);
   }
 }

@@ -231,8 +231,14 @@ export async function approve(
   id: string,
   decidedById: string,
 ): Promise<Approval> {
+  const workspaceId = resolveWorkspaceId();
   const approval = await prisma.approval.update({
-    where: { id, status: 'PENDING' },
+    // Scope by workspaceId so a signed-in user from a different
+    // workspace cannot decide approvals they do not own. Prisma
+    // raises P2025 when the WHERE returns 0 rows, which the route
+    // layer maps to 404 — exactly the right user-visible response
+    // for a cross-workspace probe (audit finding H4).
+    where: { id, workspaceId, status: 'PENDING' },
     data: {
       status: 'APPROVED',
       decidedById,
@@ -285,8 +291,11 @@ export async function reject(
   id: string,
   decidedById: string,
 ): Promise<Approval> {
+  const workspaceId = resolveWorkspaceId();
   const approval = await prisma.approval.update({
-    where: { id, status: 'PENDING' },
+    // Same workspace scoping as `approve` — keeps cross-workspace
+    // callers from cancelling other teams' approvals (audit H4).
+    where: { id, workspaceId, status: 'PENDING' },
     data: {
       status: 'REJECTED',
       decidedById,

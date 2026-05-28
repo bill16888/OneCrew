@@ -3,7 +3,7 @@
  *
  * The AI runtime (`lib/ai/runtime.ts`) hands every `tool_use` block returned
  * by Anthropic to {@link dispatchTool}. The dispatcher is the *only* path
- * from model output to side effects. It enforces three invariants that the
+ * from model output to side effects. It enforces four invariants that the
  * design document and Property 13 ("工具调度的全函数性") require:
  *
  * 1. **Total function**: `dispatchTool` MUST always resolve to a
@@ -22,6 +22,14 @@
  *    with Zod here before any side effect runs (Requirement 5.2,
  *    Requirement 10.3). Validation failures resolve with `is_error: true`
  *    carrying the Zod error message.
+ *
+ * 4. **Per-AI tool whitelist**: When the caller supplies
+ *    `ctx.allowedTools` (typically read from `User.aiSettings.toolSet`),
+ *    any tool outside that whitelist resolves with `is_error: true` so
+ *    operators can constrain custom AIs to a subset of the surface
+ *    without changing the schema list shipped to the model. An empty or
+ *    missing list disables the check (preserves backwards compatibility
+ *    with the default Ada/Hopper roles, which expect the full surface).
  *
  * Side-effect branches:
  *   - `create_task`, `update_task_status`, `send_channel_message`
@@ -291,11 +299,27 @@ export const TOOL_ZOD_SCHEMAS: Record<ToolName, z.ZodTypeAny> = {
 /**
  * Context every tool dispatch receives from the runtime. Carries the
  * caller AI's `User.id` so side-effect branches can attribute writes
- * (e.g. `Message.userId`, `Approval.aiUserId`) to the correct AI.
+ * (e.g. `Message.userId`, `Approval.aiUserId`) to the correct AI, and
+ * an optional per-AI tool whitelist so operators can constrain custom
+ * AIs to a subset of the 6-tool surface without changing the schema
+ * list shipped to the model.
  */
 export interface ToolDispatchContext {
   /** `User.id` of the AI colleague on whose behalf the tool is running. */
   readonly aiUserId: string;
+  /**
+   * Optional whitelist of tool names this AI may invoke. When `undefined`
+   * (or an empty array, treated identically) the dispatcher falls back
+   * to the full {@link TOOL_NAMES} surface — this preserves backwards
+   * compatibility with the seeded Ada/Hopper roles, which were designed
+   * before the AI-colleague editor introduced custom tool sets. When the
+   * array is non-empty, any tool name outside it resolves with
+   * `is_error: true` and a clear "Tool ... is not enabled" message.
+   *
+   * Validates: closes the door on the gap where `User.aiSettings.toolSet`
+   * was persisted but never enforced (audit finding C4).
+   */
+  readonly allowedTools?: readonly string[];
 }
 
 /**
@@ -492,7 +516,23 @@ export async function dispatchTool(
   }
   const schema = schemaMap[call.name];
 
-  // 2. Schema validation.
+  // 2. Per-AI whitelist guard. When the runtime supplies an explicit
+  //    allowlist (read from `User.aiSettings.toolSet`), reject any tool
+  //    not in the list. An empty array is treated as "no list provided"
+  //    so seeded AIs without custom config retain the full surface.
+  if (
+    Array.isArray(ctx.allowedTools) &&
+    ctx.allowedTools.length > 0 &&
+    !ctx.allowedTools.includes(call.name)
+  ) {
+    return buildToolResult(
+      call.id,
+      `Tool '${call.name}' is not enabled for this AI. Allowed: ${ctx.allowedTools.join(', ')}.`,
+      true,
+    );
+  }
+
+  // 3. Schema validation.
   const parsed = schema.safeParse(call.input);
   if (!parsed.success) {
     return buildToolResult(

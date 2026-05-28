@@ -77,6 +77,12 @@ vi.mock('@/lib/prisma', () => ({
         task: { create: hoisted.txTaskCreate },
       }),
     task: {
+      // Audit H4 scopes updateStatus by workspaceId via a separate
+      // findFirst; return a synthetic row so the subsequent update
+      // call inside the same code path proceeds.
+      findFirst: vi.fn(async (args: { where: { taskId: string } }) => ({
+        id: `internal_${args.where.taskId}`,
+      })),
       update: hoisted.taskUpdateMock,
       findMany: vi.fn(async () => []),
     },

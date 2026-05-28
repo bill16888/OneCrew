@@ -255,8 +255,26 @@ export async function updateStatus(
     );
   }
 
+  const workspaceId = resolveWorkspaceId();
+
+  // Scope the lookup by `workspaceId` so a caller from a different
+  // workspace cannot move tasks they do not own. The MVP has a single
+  // workspace today, but baking this guard in now means the multi-
+  // workspace migration is just a matter of switching `resolveWorkspaceId()`
+  // to the session's workspace, with no service-layer changes
+  // (audit finding H4).
+  const existing = await prisma.task.findFirst({
+    where: { taskId, workspaceId },
+    select: { id: true },
+  });
+  if (!existing) {
+    throw new ValidationError(
+      `Task ${taskId} does not exist in this workspace.`,
+    );
+  }
+
   const task = await prisma.task.update({
-    where: { taskId },
+    where: { id: existing.id },
     data: { status },
   });
 

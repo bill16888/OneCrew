@@ -45,26 +45,22 @@
 
 import type { Approval } from '@prisma/client';
 import { Prisma } from '@prisma/client';
-import { getServerSession } from 'next-auth';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
-import { authOptions } from '@/lib/auth/options';
+import {
+  enforceRateLimit,
+  errorResponse,
+  requireSession,
+  type ApiErrorResponse,
+} from '@/lib/api-helpers';
+import { RateLimits } from '@/lib/ratelimit';
 import { ApprovalService } from '@/lib/services/approval.service';
 
 /** Always run this route on the Node.js runtime (Prisma needs Node APIs). */
 export const runtime = 'nodejs';
 /** Disable static optimization — every request is session-bound. */
 export const dynamic = 'force-dynamic';
-
-/**
- * Error envelope returned for every non-2xx response. Matches the
- * sibling `/api/messages` and `/api/tasks` routes so clients can rely
- * on a single `{ error: string }` contract across the API surface.
- */
-interface ApiErrorResponse {
-  error: string;
-}
 
 /**
  * Path-parameter shape injected by Next.js App Router for dynamic
@@ -152,37 +148,36 @@ export async function PATCH(
 ): Promise<NextResponse<Approval | ApiErrorResponse>> {
   // 1. Auth gate. Without a session we refuse to disclose anything
   //    about the approval (existence or shape).
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    return NextResponse.json<ApiErrorResponse>(
-      { error: 'Unauthorized' },
-      { status: 401 },
-    );
-  }
+  const session = await requireSession();
+  if (session instanceof NextResponse) return session;
   const decidedById = session.user.id;
 
-  // 2. Parse JSON body. Malformed JSON → 400 with a clear hint.
+  // 2. Rate limit (audit H2). Approvals are sensitive: we keep this
+  //    bucket tighter than the generic write limit so a runaway click
+  //    cannot bypass review.
+  const limited = enforceRateLimit(
+    'approvals.decide',
+    decidedById,
+    RateLimits.APPROVAL,
+  );
+  if (limited) return limited;
+
+  // 3. Parse JSON body. Malformed JSON → 400 with a clear hint.
   let rawBody: unknown;
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json<ApiErrorResponse>(
-      { error: 'Request body must be valid JSON.' },
-      { status: 400 },
-    );
+    return errorResponse('Request body must be valid JSON.', 400);
   }
 
-  // 3. Schema-validate the body. Shape / enum failures → 400.
+  // 4. Schema-validate the body. Shape / enum failures → 400.
   const parsed = decisionBodySchema.safeParse(rawBody);
   if (!parsed.success) {
-    return NextResponse.json<ApiErrorResponse>(
-      { error: formatZodError(parsed.error) },
-      { status: 400 },
-    );
+    return errorResponse(formatZodError(parsed.error), 400);
   }
   const body: DecisionBody = parsed.data;
 
-  // 4. Delegate to the service layer. Each branch transitions the row
+  // 5. Delegate to the service layer. Each branch transitions the row
   //    and — on a successful commit — emits the matching event on the
   //    agentic emitter (`wakeup` for approve, `reject` for reject).
   try {
@@ -192,20 +187,14 @@ export async function PATCH(
         : await ApprovalService.reject(params.id, decidedById);
     return NextResponse.json<Approval>(approval, { status: 200 });
   } catch (err) {
-    // 5a. Prisma "record not found" → 404 so the client can surface
+    // 6a. Prisma "record not found" → 404 so the client can surface
     //     a distinct "this approval no longer exists" message.
     if (isPrismaNotFoundError(err)) {
-      return NextResponse.json<ApiErrorResponse>(
-        { error: `Approval "${params.id}" not found.` },
-        { status: 404 },
-      );
+      return errorResponse(`Approval "${params.id}" not found.`, 404);
     }
-    // 5b. Anything else is treated as an internal failure. The
+    // 6b. Anything else is treated as an internal failure. The
     //     service layer guarantees no realtime event has been emitted
     //     when persistence fails (see lib/services/approval.service.ts).
-    return NextResponse.json<ApiErrorResponse>(
-      { error: 'Failed to update approval.' },
-      { status: 500 },
-    );
+    return errorResponse('Failed to update approval.', 500);
   }
 }

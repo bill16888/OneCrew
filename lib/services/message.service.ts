@@ -21,10 +21,29 @@
 
 import type { Message, Prisma } from '@prisma/client';
 
+import { logger } from '@/lib/logger';
 import { agenticEmitter } from '@/lib/loop/emitter';
 import prisma from '@/lib/prisma';
 import { EVENTS, type MessageNewPayload } from '@/lib/realtime/events';
 import { getIO } from '@/lib/realtime/io';
+
+/**
+ * Default workspace identifier used when `process.env.WORKSPACE_ID` is
+ * unset. Mirrors the single-workspace MVP assumption (Requirement 1.7)
+ * and is kept aligned with `lib/services/task.service.ts`,
+ * `lib/services/approval.service.ts`, and `prisma/seed.ts`.
+ */
+const DEFAULT_WORKSPACE_ID = 'ws_default';
+
+/**
+ * Resolve the active workspace id from the environment, falling back
+ * to {@link DEFAULT_WORKSPACE_ID}. Read lazily (per call) so test
+ * harnesses can mutate `process.env.WORKSPACE_ID` between invocations.
+ */
+function resolveWorkspaceId(): string {
+  const fromEnv = process.env.WORKSPACE_ID;
+  return fromEnv && fromEnv.length > 0 ? fromEnv : DEFAULT_WORKSPACE_ID;
+}
 
 /**
  * Maximum allowed length (in UTF-16 code units) for a single message body.
@@ -195,6 +214,22 @@ function assertValidContent(content: string): void {
 export async function create(input: CreateMessageInput): Promise<Message> {
   assertValidContent(input.content);
 
+  // Verify the target channel belongs to the active workspace before
+  // we attempt the insert. The single-workspace MVP makes this a
+  // tautology today, but baking the check in now ensures the
+  // multi-workspace migration cannot accidentally let a user post into
+  // a channel they do not own (audit finding H4).
+  const workspaceId = resolveWorkspaceId();
+  const channel = await prisma.channel.findFirst({
+    where: { id: input.channelId, workspaceId },
+    select: { id: true },
+  });
+  if (!channel) {
+    throw new ValidationError(
+      `Channel ${input.channelId} does not exist in this workspace.`,
+    );
+  }
+
   // Single round-trip: insert the message and read back the sender's
   // isAI flag via Prisma's `include`. Avoids a second query while
   // keeping the return type aligned with the {@link Message} contract.
@@ -255,11 +290,42 @@ const MENTION_REGEX = /@([\w\u4e00-\u9fff]+)/g;
  * recognise. Lower-case the values too so the comparison stays
  * case-insensitive (CJK is unaffected by case-folding, but keeping
  * the codepath uniform avoids subtle Unicode bugs later).
+ *
+ * Custom AI colleagues created through the AI-colleague editor can
+ * extend this set per-user via `aiSettings.mentionAliases`; see
+ * {@link extractCustomMentionAliases}.
  */
 const MENTION_ALIASES: Record<string, readonly string[]> = {
   ada: ['艾达', '阿达', 'ada'],
   hopper: ['霍珀', '霍普', '哈珀', '哈柏', 'hopper'],
 };
+
+/**
+ * Read `User.aiSettings.mentionAliases` and return the cleaned list
+ * of additional aliases this AI should respond to. Used in addition
+ * to {@link MENTION_ALIASES} and the AI's literal `User.name`, so
+ * custom AIs created via the AI-colleague editor can be summoned by
+ * Chinese aliases / nicknames without code changes.
+ *
+ * Validates: closes audit finding H1 ("custom AIs cannot be
+ * @-mentioned with non-English names").
+ */
+function extractCustomMentionAliases(aiSettings: unknown): readonly string[] {
+  if (
+    aiSettings === null ||
+    aiSettings === undefined ||
+    typeof aiSettings !== 'object' ||
+    Array.isArray(aiSettings)
+  ) {
+    return [];
+  }
+  const raw = (aiSettings as Record<string, unknown>).mentionAliases;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim().toLowerCase())
+    .filter((item) => item.length > 0);
+}
 
 /**
  * Extract every `@`-prefixed name from `content` and emit a `wakeup`
@@ -283,25 +349,27 @@ async function wakeMentionedAIs(content: string): Promise<void> {
 
   const aiUsers = await prisma.user.findMany({
     where: { isAI: true, aiStatus: 'active' },
-    select: { id: true, name: true },
+    select: { id: true, name: true, aiSettings: true },
   });
 
   for (const ai of aiUsers) {
     const englishName = ai.name.trim().toLowerCase();
-    const aliases = MENTION_ALIASES[englishName] ?? [englishName];
-    const matched = aliases.some((alias) => mentions.has(alias));
+    const baseAliases = MENTION_ALIASES[englishName] ?? [englishName];
+    const customAliases = extractCustomMentionAliases(ai.aiSettings);
+    const aliases = new Set<string>([...baseAliases, ...customAliases, englishName]);
+    const matched = Array.from(aliases).some((alias) => mentions.has(alias));
     if (matched) {
       // Diagnostic: emitter singletons can drift when imported from
       // different bundle realms (next build worker vs custom server),
       // so log every emit so we can correlate with the listener side.
-      // eslint-disable-next-line no-console
-      console.info(
-        JSON.stringify({
+      logger.info(
+        {
           event: 'mention_wakeup_emit',
           aiUserId: ai.id,
           aiName: ai.name,
           listenerCount: agenticEmitter.listenerCount('wakeup'),
-        }),
+        },
+        'Mention wakeup emitted',
       );
       agenticEmitter.emit('wakeup', ai.id);
     }

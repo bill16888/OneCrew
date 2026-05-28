@@ -84,8 +84,11 @@ FROM node:20-alpine AS runner
 WORKDIR /app
 
 # OpenSSL is needed by both Prisma and bcryptjs at runtime; libc6-compat
-# keeps native modules happy on Alpine.
-RUN apk add --no-cache libc6-compat openssl tini
+# keeps native modules happy on Alpine. postgresql16-client provides
+# `pg_dump` for the nightly backup cron (`scripts/backup.ts`); the
+# version is kept in lock-step with the postgres image declared in
+# `docker-compose.prod.yml`.
+RUN apk add --no-cache libc6-compat openssl tini postgresql16-client
 
 ENV NODE_ENV=production \
     PORT=3000 \
@@ -130,19 +133,17 @@ ENTRYPOINT ["/sbin/tini", "--"]
 # common Railway/Postgres URL aliases, or PGHOST/PGUSER/PGPASSWORD style
 # variables before it invokes Prisma.
 #
-# We use `prisma db push --accept-data-loss` instead of `prisma migrate
-# deploy` because:
-#   1. `db push` syncs the schema directly without needing a hand-
-#      authored migration history. Our MVP does not require migration
-#      versioning yet (the data model is greenfield, no production
-#      records to preserve), and `migrate deploy` previously failed
-#      with `P3015` because the diff-generated migration.sql was not
-#      recognised as a complete migration entry.
-#   2. `--accept-data-loss` is a no-op on first push (empty DB) and
-#      lets later schema iterations succeed without manual intervention.
-#      In a future release where we want strict migration history, swap
-#      back to `migrate deploy` and ship a properly-generated
-#      migration directory.
+# Schema migration strategy is controlled by `PRISMA_DEPLOY_STRATEGY`:
+#   - default (unset / "migrate"): run `prisma migrate deploy`, which
+#     applies the version-controlled migration history under
+#     `prisma/migrations/`. If a database that was previously managed
+#     by `db push` is encountered (Prisma error P3005), the wrapper
+#     auto-baselines by marking each existing migration as applied,
+#     then retries `migrate deploy` (which then becomes a no-op).
+#   - "push": fall back to `prisma db push --accept-data-loss`. This
+#     is destructive on schema changes and should only be used for
+#     greenfield bootstraps. Set this temporarily in Railway when
+#     starting from an empty database for the first time.
 #
 # `set -e` ensures a non-zero exit from the wrapper surfaces as a
 # container crash with a clear error, instead of being swallowed.
