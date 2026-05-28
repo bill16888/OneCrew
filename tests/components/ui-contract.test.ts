@@ -45,14 +45,21 @@ describe('Feature: ai-native-team-workspace, KanbanBoard 4 列契约 (Requiremen
     ]);
   });
 
-  it('每列都有人类可读 label，且 InProgress/InReview 渲染为带空格版本', () => {
+  it('每列都有人类可读 label，且使用统一的中文文案', () => {
+    // The product UI is shipped in Simplified Chinese (matches the
+    // rest of the workspace surface — sidebar, dialogs, buttons). The
+    // backing `TaskStatus` enum stays in PascalCase English for API
+    // / Prisma compatibility; only the user-facing `label` is
+    // localised. Update both this assertion and the labels in
+    // `KanbanBoard.tsx` together if a future translation pass adds a
+    // second locale.
     const labelByStatus = Object.fromEntries(
       KANBAN_COLUMNS.map((c) => [c.status, c.label]),
     );
-    expect(labelByStatus.Backlog).toBe('Backlog');
-    expect(labelByStatus.InProgress).toBe('In Progress');
-    expect(labelByStatus.InReview).toBe('In Review');
-    expect(labelByStatus.Done).toBe('Done');
+    expect(labelByStatus.Backlog).toBe('待办');
+    expect(labelByStatus.InProgress).toBe('进行中');
+    expect(labelByStatus.InReview).toBe('审查中');
+    expect(labelByStatus.Done).toBe('已完成');
   });
 
   it('renderToString 后 HTML 中出现全部 4 个列 label', () => {

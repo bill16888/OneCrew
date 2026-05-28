@@ -21,9 +21,13 @@ import { cn } from '@/lib/utils';
 /** Internal column descriptor — `status` matches the literal union. */
 interface KanbanColumn {
   status: TaskStatus;
-  /** Display label rendered in the column header. Note that `InProgress`
-   *  and `InReview` are deliberately split into "In Progress" /
-   *  "In Review" for readability while the backing enum stays compact. */
+  /** Display label rendered in the column header. The backing
+   *  `TaskStatus` enum stays in PascalCase English for API / Prisma
+   *  compatibility; only the user-facing `label` is localised
+   *  (today: Simplified Chinese). Tests in
+   *  `tests/components/ui-contract.test.ts` lock the exact label
+   *  strings — update both files together if a translation pass
+   *  ships a second locale. */
   label: string;
 }
 
