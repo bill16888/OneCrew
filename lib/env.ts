@@ -178,6 +178,41 @@ const envSchema = z.object({
     .default(30_000),
 
   /**
+   * Real-tool configuration for the new `web_search` /
+   * `read_project_docs` tools added in Phase 1 (Req 12). Missing
+   * values disable the corresponding tool gracefully — the dispatcher
+   * still routes the call but `withSafeExecution` returns
+   * `is_error: true` with a clear "tool not configured" message so
+   * the AI can self-correct on the next round.
+   */
+  TAVILY_API_KEY: z
+    .preprocess(emptyStringToUndefined, z.string().min(1).optional())
+    .default(''),
+
+  SERPER_API_KEY: z
+    .preprocess(emptyStringToUndefined, z.string().min(1).optional())
+    .default(''),
+
+  WEB_SEARCH_PROVIDER: z
+    .enum(['tavily', 'serper'])
+    .default('tavily'),
+
+  /** Per-call USD cost charged to {@link Budget.trackOther} for every
+   *  successful `web_search` invocation (Req 12.6). Default biases
+   *  the breaker toward tripping a touch early. */
+  WEB_SEARCH_COST_USD: z.coerce
+    .number()
+    .nonnegative('WEB_SEARCH_COST_USD must be ≥ 0')
+    .default(0.001),
+
+  /** Optional GitHub PAT or Actions token for `read_project_docs`.
+   *  When unset, requests go anonymously and share the 60 req/h
+   *  unauthenticated rate limit. */
+  GITHUB_TOKEN: z
+    .preprocess(emptyStringToUndefined, z.string().min(1).optional())
+    .default(''),
+
+  /**
    * When `true`, the Agentic Loop fires every
    * `AI_AGENT_INTERVAL_MS` ms and wakes every AI whether or not a
    * human has spoken to them. Useful for live demos and the spec's

@@ -53,12 +53,16 @@
 
 import { z } from 'zod';
 
+import { BUDGET_EXCEEDED_CODE, budget } from '@/lib/ai/budget';
+import { env } from '@/lib/env';
 import { ApprovalService } from '@/lib/services/approval.service';
 import { MessageService } from '@/lib/services/message.service';
 import { TaskService } from '@/lib/services/task.service';
 
 import { type AnthropicLikeToolResultBlock as ToolResultBlockParam } from '../openai-bridge';
 import { mockReadProjectDocs, mockWebSearch } from './mocks';
+import { formatResults, webSearch } from './web-search';
+import { withSafeExecution } from './with-safe-execution';
 
 // ---------------------------------------------------------------------------
 // Tool definitions (Anthropic SDK shape)
@@ -216,6 +220,19 @@ export const TOOL_DEFINITIONS = [
       required: ['path'],
     },
   },
+  {
+    name: 'web_search',
+    description:
+      'Search the public web for recent information. Calls a configured search provider (Tavily by default) and returns ranked results with titles, URLs, and snippets. Use this when you need facts that may have changed since training time. Costs a small fee per call charged to the daily AI budget.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string' },
+        maxResults: { type: 'number' },
+      },
+      required: ['query'],
+    },
+  },
 ] as const;
 
 /**
@@ -289,6 +306,11 @@ export const TOOL_ZOD_SCHEMAS: Record<ToolName, z.ZodTypeAny> = {
 
   mock_read_project_docs: z.object({
     path: z.string().min(1),
+  }),
+
+  web_search: z.object({
+    query: z.string().min(1).max(500),
+    maxResults: z.number().int().min(1).max(10).optional(),
   }),
 };
 
@@ -694,6 +716,47 @@ export async function dispatchTool(
         // Property 14 ("Mock 工具的纯净性").
         const { path } = input as { path: string };
         return buildToolResult(call.id, mockReadProjectDocs(path));
+      }
+
+      case 'web_search': {
+        // Phase 1 Req 12.2 — real web search. Routed through
+        // `withSafeExecution` so the dispatcher's totality guarantee
+        // (Property 13) survives provider 4xx/5xx, timeouts, and
+        // missing API keys (Req 12.4). Successful calls charge
+        // `WEB_SEARCH_COST_USD` against the daily budget so a
+        // runaway loop can't bypass the breaker (Req 12.6 + audit M1).
+        const { query, maxResults } = input as {
+          query: string;
+          maxResults?: number;
+        };
+        const result = await withSafeExecution(
+          { toolName: 'web_search' },
+          async (signal) => {
+            const rows = await webSearch(query, { maxResults, signal });
+            // Account for the per-call cost only on success. Failures
+            // throw (caught by withSafeExecution) and never reach this
+            // line, so a misconfigured provider never charges the budget.
+            try {
+              budget.trackOther(env.WEB_SEARCH_COST_USD, 'web_search');
+            } catch (budgetErr) {
+              // Budget exceeded mid-call: still surface the search
+              // results we already paid for, but log the trip so the
+              // runtime's outer guard catches it on the next round.
+              if (
+                budgetErr instanceof Error &&
+                budgetErr.message === BUDGET_EXCEEDED_CODE
+              ) {
+                // Swallow — runtime's per-cycle gate will pause the
+                // next round; surfacing results we already paid for
+                // is strictly better than discarding them.
+              } else {
+                throw budgetErr;
+              }
+            }
+            return formatResults(query, rows);
+          },
+        );
+        return buildToolResult(call.id, result.content, !result.ok);
       }
 
       default: {

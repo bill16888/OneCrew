@@ -299,6 +299,40 @@ export class Budget {
   }
 
   /**
+   * Account for a non-token cost (Phase 1 Req 12.6).
+   *
+   * The MVP `track()` method only knows about token-based pricing
+   * from {@link MODEL_PRICING}. Phase 1 introduces real tools whose
+   * cost is per-call (e.g. `web_search` via Tavily charges a flat
+   * fee per query). This helper folds those costs into the same
+   * daily breaker so an operator can't be surprised by a runaway
+   * tool bill that bypassed the model-call ceiling.
+   *
+   * Same circuit-breaker semantics as `track()`: rolls over the day,
+   * adds the cost, throws `Error('AI_BUDGET_EXCEEDED')` when the
+   * tally exceeds the limit. The accumulated total is kept (not
+   * rolled back) so observability tools see the true overshoot.
+   *
+   * @param usd Cost in USD. Negative or non-finite values are
+   *   clamped to 0 — a misconfigured pricing env should never credit
+   *   the budget back.
+   * @param source Free-form tag stored only for log correlation
+   *   (e.g. `'web_search'`). Not persisted; callers log it themselves.
+   */
+  trackOther(usd: number, source: string): void {
+    void source;
+    const now = new Date();
+    this.rolloverIfNeeded(now);
+
+    const safeCost = Number.isFinite(usd) && usd > 0 ? usd : 0;
+    this.todayUSD += safeCost;
+
+    if (this.todayUSD > env.AI_DAILY_BUDGET_USD) {
+      throw new Error(BUDGET_EXCEEDED_CODE);
+    }
+  }
+
+  /**
    * Reset today's spend to zero and recompute `resetAt`. Exposed for
    * unit tests only; production code MUST NOT call this.
    */
