@@ -38,6 +38,12 @@ vi.mock('@/lib/prisma', () => ({
         id: args.where.id,
       })),
     },
+    // Phase 1 Req 17: membership check before insert. Treat every
+    // (channel, user) pair as a member so these content tests stay
+    // focused on validation.
+    channelMember: {
+      findUnique: vi.fn(async () => ({ channelId: 'c1' })),
+    },
     message: {
       create: hoisted.prismaCreate,
       findMany: vi.fn(async () => []),

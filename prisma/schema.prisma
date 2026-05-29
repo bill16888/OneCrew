@@ -33,11 +33,12 @@ model User {
   aiStatus      String?    @default("active")
   workspaceId   String
   workspace     Workspace  @relation(fields: [workspaceId], references: [id])
-  messages      Message[]
-  tasksCreated  Task[]     @relation("TaskCreator")
-  tasksAssigned Task[]     @relation("TaskAssignee")
-  approvals     Approval[]
-  createdAt     DateTime   @default(now())
+  messages       Message[]
+  tasksCreated   Task[]          @relation("TaskCreator")
+  tasksAssigned  Task[]          @relation("TaskAssignee")
+  approvals      Approval[]
+  channelMembers ChannelMember[]
+  createdAt      DateTime        @default(now())
 
   @@index([workspaceId])
   @@index([isAI])
@@ -45,14 +46,31 @@ model User {
 }
 
 model Channel {
-  id          String    @id @default(cuid())
+  id          String          @id @default(cuid())
   name        String
   workspaceId String
-  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  workspace   Workspace       @relation(fields: [workspaceId], references: [id])
   messages    Message[]
-  createdAt   DateTime  @default(now())
+  members     ChannelMember[]
+  createdAt   DateTime        @default(now())
 
   @@index([workspaceId])
+}
+
+// Channel membership (Phase 1 Req 17). Controls which users — human
+// and AI — participate in which channels. The migration backfills
+// every existing (channel, user) pair so legacy behaviour (everyone
+// in every channel) is preserved.
+model ChannelMember {
+  channelId String
+  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      String   @default("human") // 'human' | 'ai'
+  joinedAt  DateTime @default(now())
+
+  @@id([channelId, userId])
+  @@index([userId])
 }
 
 model Message {

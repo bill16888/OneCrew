@@ -43,11 +43,20 @@ vi.mock('@prisma/client', () => {
         hoisted.upserts.push({ table: 'user', args });
         return { id: 'user_x' };
       }),
+      findMany: vi.fn(async () => [
+        { id: 'user_x', isAI: false },
+      ]),
     };
     channel = {
       upsert: vi.fn(async (args: UpsertCall['args']) => {
         hoisted.upserts.push({ table: 'channel', args });
         return { id: args.where.id as string };
+      }),
+    };
+    channelMember = {
+      upsert: vi.fn(async (args: UpsertCall['args']) => {
+        hoisted.upserts.push({ table: 'channelMember', args });
+        return {};
       }),
     };
     async $disconnect() {

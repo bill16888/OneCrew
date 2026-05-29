@@ -14,7 +14,7 @@
  * @module lib/services/channel.service
  */
 
-import type { Channel, Message } from '@prisma/client';
+import type { Channel, ChannelMember, Message } from '@prisma/client';
 
 import prisma from '@/lib/prisma';
 
@@ -99,10 +99,107 @@ export async function getMessages(
 }
 
 /**
+ * Member descriptor returned by {@link listMembers} — joins the
+ * membership row with the minimal user fields the UI renders.
+ */
+export interface ChannelMemberView {
+  userId: string;
+  name: string;
+  isAI: boolean;
+  role: string;
+  joinedAt: string;
+}
+
+/**
+ * Return true iff `userId` is a member of `channelId`. Used by
+ * `MessageService.create` (membership enforcement, Phase 1 Req 17.2)
+ * and the members API.
+ */
+export async function isMember(
+  channelId: string,
+  userId: string,
+): Promise<boolean> {
+  const row = await prisma.channelMember.findUnique({
+    where: { channelId_userId: { channelId, userId } },
+    select: { channelId: true },
+  });
+  return row !== null;
+}
+
+/**
+ * List every member of a channel, newest joins last, with the user's
+ * name + isAI flag for rendering. Ordered by `joinedAt` ascending.
+ *
+ * Validates: Phase 1 Req 17.4.
+ */
+export async function listMembers(
+  channelId: string,
+): Promise<ChannelMemberView[]> {
+  const rows = await prisma.channelMember.findMany({
+    where: { channelId },
+    orderBy: { joinedAt: 'asc' },
+    include: { user: { select: { name: true, isAI: true } } },
+  });
+  return rows.map((r) => ({
+    userId: r.userId,
+    name: r.user.name,
+    isAI: r.user.isAI,
+    role: r.role,
+    joinedAt: r.joinedAt.toISOString(),
+  }));
+}
+
+/**
+ * Add a user to a channel. Idempotent: re-adding an existing member is
+ * a no-op (upsert). `role` is derived from the user's `isAI` flag so
+ * the membership row stays consistent with the user record.
+ *
+ * Validates: Phase 1 Req 17.5.
+ *
+ * @throws when the user or channel does not exist (Prisma FK error).
+ */
+export async function addMember(
+  channelId: string,
+  userId: string,
+): Promise<ChannelMember> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { isAI: true },
+  });
+  if (!user) {
+    throw new Error(`User ${userId} does not exist.`);
+  }
+  const role = user.isAI ? 'ai' : 'human';
+  return prisma.channelMember.upsert({
+    where: { channelId_userId: { channelId, userId } },
+    update: { role },
+    create: { channelId, userId, role },
+  });
+}
+
+/**
+ * Remove a user from a channel. Idempotent: removing a non-member is a
+ * no-op (returns false). Returns true when a row was actually deleted.
+ */
+export async function removeMember(
+  channelId: string,
+  userId: string,
+): Promise<boolean> {
+  const result = await prisma.channelMember.deleteMany({
+    where: { channelId, userId },
+  });
+  return result.count > 0;
+}
+
+/**
  * Aggregated namespace export so callers can use either named imports
  * or the `ChannelService.method(...)` style favored across the spec.
  */
 export const ChannelService = {
   listByWorkspace,
   getMessages,
+  isMember,
+  listMembers,
+  addMember,
+  removeMember,
 } as const;

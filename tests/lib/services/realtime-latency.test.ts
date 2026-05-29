@@ -40,6 +40,11 @@ vi.mock('@/lib/prisma', () => ({
         id: args.where.id,
       })),
     },
+    // Phase 1 Req 17: membership check before insert. Near-zero-cost
+    // passthrough so it doesn't skew the latency measurement.
+    channelMember: {
+      findUnique: vi.fn(async () => ({ channelId: 'c' })),
+    },
     message: {
       create: vi.fn(async (args: { data: { channelId: string; content: string; userId: string } }) => {
         hoisted.dbCommittedAt.value = performance.now();

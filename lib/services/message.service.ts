@@ -223,6 +223,21 @@ export async function create(input: CreateMessageInput): Promise<Message> {
     );
   }
 
+  // Enforce channel membership (Phase 1 Req 17.2). The sender — human
+  // or AI — must be a member of the channel. The migration backfills
+  // every existing (channel, user) pair so this never rejects a
+  // legacy sender; only NEW users/AIs that were not explicitly added
+  // are blocked. Composite-key lookup is a single indexed read.
+  const membership = await prisma.channelMember.findUnique({
+    where: { channelId_userId: { channelId: input.channelId, userId: input.userId } },
+    select: { channelId: true },
+  });
+  if (!membership) {
+    throw new ValidationError(
+      `User ${input.userId} is not a member of channel ${input.channelId}.`,
+    );
+  }
+
   // Single round-trip: insert the message and read back the sender's
   // isAI flag via Prisma's `include`. Avoids a second query while
   // keeping the return type aligned with the {@link Message} contract.
@@ -258,12 +273,14 @@ export async function create(input: CreateMessageInput): Promise<Message> {
   // message but never blocks the message itself — the persisted /
   // broadcast write has already happened above.
   if (!user.isAI) {
-    void wakeMentionedAIs(message.content, input.userId).catch(() => {
-      // Mention resolution failures are non-fatal; the message has
-      // already been persisted + broadcast. Worst case: the AI
-      // doesn't get its instant wakeup and runs on the next tick (or
-      // never, when AI_AUTO_TICK is off — the user can re-prompt).
-    });
+    void wakeMentionedAIs(message.content, input.userId, message.channelId).catch(
+      () => {
+        // Mention resolution failures are non-fatal; the message has
+        // already been persisted + broadcast. Worst case: the AI
+        // doesn't get its instant wakeup and runs on the next tick (or
+        // never, when AI_AUTO_TICK is off — the user can re-prompt).
+      },
+    );
   }
 
   return message;
@@ -360,6 +377,7 @@ function extractCustomMentionAliases(aiSettings: unknown): readonly string[] {
 async function wakeMentionedAIs(
   content: string,
   senderId: string,
+  channelId: string,
 ): Promise<void> {
   const mentions = new Set<string>();
   for (const match of content.matchAll(MENTION_REGEX)) {
@@ -397,8 +415,17 @@ async function wakeMentionedAIs(
   }
   if (allowedMentions.size === 0) return;
 
+  // Only consider AIs that are members of the channel where the
+  // mention appeared (Phase 1 Req 17.3). An @mention for an AI that
+  // isn't in this channel is silently ignored — the AI never sees a
+  // channel it wasn't added to. Membership is joined in the same query
+  // so this stays a single round-trip.
   const aiUsers = await prisma.user.findMany({
-    where: { isAI: true, aiStatus: 'active' },
+    where: {
+      isAI: true,
+      aiStatus: 'active',
+      channelMembers: { some: { channelId } },
+    },
     select: { id: true, name: true, aiSettings: true },
   });
 
