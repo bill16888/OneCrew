@@ -228,6 +228,26 @@ const envSchema = z.object({
     .default(30_000),
 
   /**
+   * AI daily report (Phase 1 Req 15). When `DAILY_REPORTS_ENABLED` is
+   * true the custom server schedules a `node-cron` job at
+   * `DAILY_REPORT_CRON` (in `WORKSPACE_TZ`) that asks each active AI to
+   * post an end-of-day digest to `#general`. Disabled by default so the
+   * feature rolls out opt-in.
+   */
+  DAILY_REPORTS_ENABLED: z
+    .preprocess(
+      (v) => (typeof v === 'string' ? v.toLowerCase() === 'true' : v),
+      z.boolean(),
+    )
+    .default(false),
+
+  /** Crontab expression for the daily report. Default: 18:00 daily. */
+  DAILY_REPORT_CRON: z.string().min(1).default('0 18 * * *'),
+
+  /** IANA timezone the daily-report cron is evaluated in. */
+  WORKSPACE_TZ: z.string().min(1).default('Asia/Shanghai'),
+
+  /**
    * Real-tool configuration for the new `web_search` /
    * `read_project_docs` tools added in Phase 1 (Req 12). Missing
    * values disable the corresponding tool gracefully — the dispatcher
