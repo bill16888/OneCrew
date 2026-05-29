@@ -248,6 +248,18 @@ const envSchema = z.object({
   WORKSPACE_TZ: z.string().min(1).default('Asia/Shanghai'),
 
   /**
+   * Operator dashboard (Phase 1 Req 13). When true the workspace root
+   * (`/`) redirects to `/dashboard`. Behind a flag for safe rollout;
+   * the dashboard route itself is always reachable directly.
+   */
+  DASHBOARD_ENABLED: z
+    .preprocess(
+      (v) => (typeof v === 'string' ? v.toLowerCase() === 'true' : v),
+      z.boolean(),
+    )
+    .default(false),
+
+  /**
    * Real-tool configuration for the new `web_search` /
    * `read_project_docs` tools added in Phase 1 (Req 12). Missing
    * values disable the corresponding tool gracefully — the dispatcher
