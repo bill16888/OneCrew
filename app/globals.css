@@ -14,6 +14,15 @@
 @layer base {
   :root {
     color-scheme: dark;
+    /*
+     * Brand accent (Phase 1 Req 16.4). Defaults to the indigo primary
+     * (#6366F1) but an operator can override it without touching
+     * component code — e.g. inject a different value via a build-time
+     * env or a runtime <style> tag. Tailwind exposes this as the
+     * `brand` color (see tailwind.config.ts), so `text-brand`,
+     * `bg-brand`, `border-brand`, etc. all follow this variable.
+     */
+    --brand: #6366f1;
   }
 
   html,

@@ -24,6 +24,9 @@
 | `DEEPSEEK_MODEL`                   | 默认 `deepseek-chat`                        | 切 `deepseek-reasoner` 启用 chain-of-thought 模型        |
 | `WORKSPACE_ID`                     | 非空字符串                                  | 默认 `ws_default`，与 seed 必须一致                       |
 | `SEED_HUMAN_PASSWORD`              | 强密码（首次部署后立即换掉种子账户密码） | **生产环境必填**——`prisma:seed` 在 `NODE_ENV=production` 下若未设置会拒绝降级到 `password123`，整个 seed step 失败 |
+| `WORKSPACE_NAME`                   | 工作区显示名                                | **生产 seed 必填**——未设时 seed 拒绝种入 demo 品牌名 |
+| `SEED_EMAIL_DOMAIN`                | 种子用户邮箱域名（如 `workspace.local`）   | **生产 seed 必填**——未设时拒绝种入 `helio.local` |
+| `AI_AGENT_NAMES_JSON`              | AI 同事配置 JSON 数组                        | **生产 seed 必填**——未设时拒绝种入 demo Ada/Hopper；格式见 `.env.example` |
 
 **有默认值但生产强烈建议显式设置**：
 

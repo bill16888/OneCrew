@@ -30,6 +30,11 @@ const config: Config = {
         // Canvas + surface scale tuned for the #0A0A0A base
         background: '#0A0A0A',
         foreground: '#F5F5F5',
+        // Operator-configurable brand accent, driven by the `--brand`
+        // CSS variable declared in app/globals.css (Phase 1 Req 16.4).
+        // Defaults to the indigo primary; override the CSS var to
+        // re-skin without changing component classes.
+        brand: 'var(--brand)',
         surface: {
           DEFAULT: '#111113',
           raised: '#17171A',

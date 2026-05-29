@@ -285,36 +285,47 @@ export async function create(input: CreateMessageInput): Promise<Message> {
 const MENTION_REGEX = /@([\p{L}\p{N}_]+)/gu;
 
 /**
- * Common Chinese transliterations of each AI colleague's English
- * name. The browser-side translator (and humans) routinely render
- * `Ada` → `艾达 / 阿达` and `Hopper` → `霍珀 / 霍普 / 哈珀 / 哈柏`,
- * so a literal `name` comparison would miss those. We expand the
- * mention set with this table before matching against the database.
+ * Decide whether an AI colleague should be woken by a set of
+ * lowercased `@`-mention tokens. An AI matches when any of the
+ * mention tokens equals its lowercased `name` or any entry in its
+ * `aiSettings.mentionAliases`.
  *
- * Keys are lowercased English names that match `User.name` in the
- * seed; values are the alternate forms the wakeup matcher should
- * recognise. Lower-case the values too so the comparison stays
- * case-insensitive (CJK is unaffected by case-folding, but keeping
- * the codepath uniform avoids subtle Unicode bugs later).
+ * Exported as a pure function so the matching contract — "aliases
+ * come from data (aiSettings), never a hard-coded brand table" — can
+ * be unit-tested directly without the async `create` / emitter path
+ * (Phase 1 Req 16.2).
  *
- * Custom AI colleagues created through the AI-colleague editor can
- * extend this set per-user via `aiSettings.mentionAliases`; see
- * {@link extractCustomMentionAliases}.
+ * @param aiName     The AI's `User.name`.
+ * @param aiSettings The AI's `User.aiSettings` JSON value.
+ * @param mentions   Lowercased mention tokens parsed from a message.
  */
-const MENTION_ALIASES: Record<string, readonly string[]> = {
-  ada: ['艾达', '阿达', 'ada'],
-  hopper: ['霍珀', '霍普', '哈珀', '哈柏', 'hopper'],
-};
+export function aiMatchesMentions(
+  aiName: string,
+  aiSettings: unknown,
+  mentions: ReadonlySet<string>,
+): boolean {
+  const englishName = aiName.trim().toLowerCase();
+  const customAliases = extractCustomMentionAliases(aiSettings);
+  const aliases = new Set<string>([englishName, ...customAliases]);
+  return Array.from(aliases).some((alias) => mentions.has(alias));
+}
 
 /**
  * Read `User.aiSettings.mentionAliases` and return the cleaned list
  * of additional aliases this AI should respond to. Used in addition
- * to {@link MENTION_ALIASES} and the AI's literal `User.name`, so
- * custom AIs created via the AI-colleague editor can be summoned by
- * Chinese aliases / nicknames without code changes.
+ * to the AI's literal `User.name`, so AIs created via the AI-colleague
+ * editor — or seeded with transliterations — can be summoned by alias
+ * without any brand-specific table in code.
  *
- * Validates: closes audit finding H1 ("custom AIs cannot be
- * @-mentioned with non-English names").
+ * The seed (`prisma/seed.ts`) populates `aiSettings.mentionAliases`
+ * from `AI_AGENT_NAMES_JSON`; the legacy hard-coded Ada→艾达 /
+ * Hopper→霍珀 table that used to live here was removed in Phase 1
+ * Req 16.2 so the runtime carries no brand identifiers. Existing
+ * deployments must re-run `prisma:seed` (idempotent) to populate the
+ * aliases for already-seeded AIs.
+ *
+ * Validates: Phase 1 Req 16.2; closes audit finding H1 ("custom AIs
+ * cannot be @-mentioned with non-English names").
  */
 function extractCustomMentionAliases(aiSettings: unknown): readonly string[] {
   if (
@@ -336,7 +347,7 @@ function extractCustomMentionAliases(aiSettings: unknown): readonly string[] {
 /**
  * Extract every `@`-prefixed name from `content` and emit a `wakeup`
  * for each AI user whose `name` (or any alias in
- * {@link MENTION_ALIASES}) matches. Comparison is case-insensitive
+ * `aiSettings.mentionAliases`) matches. Comparison is case-insensitive
  * and tolerates leading / trailing whitespace.
  *
  * Lookup happens in a single `prisma.user.findMany` so a message that
@@ -392,13 +403,7 @@ async function wakeMentionedAIs(
   });
 
   for (const ai of aiUsers) {
-    const englishName = ai.name.trim().toLowerCase();
-    const baseAliases = MENTION_ALIASES[englishName] ?? [englishName];
-    const customAliases = extractCustomMentionAliases(ai.aiSettings);
-    const aliases = new Set<string>([...baseAliases, ...customAliases, englishName]);
-    const matched = Array.from(aliases).some((alias) =>
-      allowedMentions.has(alias),
-    );
+    const matched = aiMatchesMentions(ai.name, ai.aiSettings, allowedMentions);
     if (matched) {
       // Diagnostic: emitter singletons can drift when imported from
       // different bundle realms (next build worker vs custom server),

@@ -18,6 +18,20 @@ import {
 const DEFAULT_REDIRECT: string = '/';
 
 /**
+ * Workspace display name shown in the login header. Read from the
+ * build-time-inlined `NEXT_PUBLIC_WORKSPACE_NAME` so operators can
+ * brand the sign-in page without touching component code (Phase 1
+ * Req 16.4). Falls back to a neutral default — note this is a
+ * client-side env read, so changing it requires a rebuild (the value
+ * is inlined by Next.js at build time, same caveat as
+ * NEXT_PUBLIC_SOCKET_TRANSPORTS).
+ */
+const WORKSPACE_DISPLAY_NAME: string =
+  process.env.NEXT_PUBLIC_WORKSPACE_NAME && process.env.NEXT_PUBLIC_WORKSPACE_NAME.trim().length > 0
+    ? process.env.NEXT_PUBLIC_WORKSPACE_NAME
+    : 'AI Workspace';
+
+/**
  * Whitelist a `callbackUrl` to a same-origin, same-app pathname.
  *
  * NextAuth's redirect flow already constrains the URL on the server,
@@ -216,7 +230,7 @@ export default function LoginPage(): ReactElement {
       <section className="w-full max-w-sm rounded-lg border border-border bg-surface p-8 shadow-lg">
         <header className="mb-6 space-y-2 text-center">
           <h1 className="text-2xl font-semibold tracking-tight">
-            AI-Native Team Workspace
+            {WORKSPACE_DISPLAY_NAME}
           </h1>
           <p className="text-sm text-muted-foreground">
             登录到你的工作区

@@ -56,26 +56,7 @@ const EMPTY_FORM: FormState = {
   mentionAliasesText: '',
 };
 
-const FALLBACK_TEAMMATES: readonly AIColleague[] = [
-  {
-    id: 'user_ai_ada',
-    email: 'ada@helio.local',
-    name: 'Ada',
-    avatarUrl: null,
-    aiRole: 'Ada',
-    aiSettings: null,
-    aiStatus: 'active',
-  },
-  {
-    id: 'user_ai_hopper',
-    email: 'hopper@helio.local',
-    name: 'Hopper',
-    avatarUrl: null,
-    aiRole: 'Hopper',
-    aiSettings: null,
-    aiStatus: 'active',
-  },
-];
+const FALLBACK_TEAMMATES: readonly AIColleague[] = [];
 
 function asRecord(value: unknown): Record<string, unknown> {
   if (
