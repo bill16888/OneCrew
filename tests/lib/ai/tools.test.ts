@@ -77,17 +77,17 @@ const EXPECTED_TOOL_SET: readonly string[] = [
   'mock_read_project_docs',
   // Phase 1 Req 12: real read-only tools. Property 12 was amended in
   // .kiro/specs/phase-1-solo-os/requirements.md to read "exactly the
-  // 8 tools declared in TOOL_DEFINITIONS"; this PR ships the first
-  // of those (web_search). read_project_docs lands in the next PR.
+  // 8 tools declared in TOOL_DEFINITIONS".
   'web_search',
+  'read_project_docs',
 ];
 
 describe('Feature: ai-native-team-workspace, Property 12: 工具表面恒等', () => {
-  it('exposes exactly the 7 expected tools as a set', () => {
+  it('exposes exactly the 8 expected tools as a set', () => {
     const names = new Set(TOOL_DEFINITIONS.map((t) => t.name));
     expect(names).toEqual(new Set(EXPECTED_TOOL_SET));
-    expect(TOOL_DEFINITIONS).toHaveLength(7);
-    expect(TOOL_NAMES).toHaveLength(7);
+    expect(TOOL_DEFINITIONS).toHaveLength(8);
+    expect(TOOL_NAMES).toHaveLength(8);
   });
 
   it('every TOOL_DEFINITIONS entry has matching name in TOOL_NAMES', () => {

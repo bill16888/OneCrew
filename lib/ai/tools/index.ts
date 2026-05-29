@@ -61,6 +61,7 @@ import { TaskService } from '@/lib/services/task.service';
 
 import { type AnthropicLikeToolResultBlock as ToolResultBlockParam } from '../openai-bridge';
 import { mockReadProjectDocs, mockWebSearch } from './mocks';
+import { readProjectDocs } from './project-docs';
 import { formatResults, webSearch } from './web-search';
 import { withSafeExecution } from './with-safe-execution';
 
@@ -233,6 +234,21 @@ export const TOOL_DEFINITIONS = [
       required: ['query'],
     },
   },
+  {
+    name: 'read_project_docs',
+    description:
+      'Read a file (or list a directory) from a GitHub repository via the Contents API. Use this to inspect real source code, READMEs, or config in the operator\'s repos before making suggestions. Provide owner, repo, and path; ref is optional (defaults to the default branch). File bodies are capped at 64KB; directories return a listing you can drill into on the next call.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        owner: { type: 'string' },
+        repo: { type: 'string' },
+        path: { type: 'string' },
+        ref: { type: 'string' },
+      },
+      required: ['owner', 'repo', 'path'],
+    },
+  },
 ] as const;
 
 /**
@@ -311,6 +327,13 @@ export const TOOL_ZOD_SCHEMAS: Record<ToolName, z.ZodTypeAny> = {
   web_search: z.object({
     query: z.string().min(1).max(500),
     maxResults: z.number().int().min(1).max(10).optional(),
+  }),
+
+  read_project_docs: z.object({
+    owner: z.string().min(1).max(100),
+    repo: z.string().min(1).max(100),
+    path: z.string().min(1).max(500),
+    ref: z.string().min(1).max(100).optional(),
   }),
 };
 
@@ -743,6 +766,27 @@ export async function dispatchTool(
             }
             return formatResults(query, rows);
           },
+        );
+        return buildToolResult(call.id, result.content, !result.ok);
+      }
+
+      case 'read_project_docs': {
+        // Phase 1 Req 12.3 — real GitHub file/dir reader. Like
+        // web_search, routed through `withSafeExecution` so 404 /
+        // 403 / rate-limit / timeout all become is_error tool_results
+        // (Req 12.4) rather than throwing. read_project_docs does NOT
+        // charge the budget (GitHub Contents is free under the rate
+        // limit), per Req 12.6.
+        const { owner, repo, path, ref } = input as {
+          owner: string;
+          repo: string;
+          path: string;
+          ref?: string;
+        };
+        const result = await withSafeExecution(
+          { toolName: 'read_project_docs' },
+          async (signal) =>
+            readProjectDocs({ owner, repo, path, ref, signal }),
         );
         return buildToolResult(call.id, result.content, !result.ok);
       }
