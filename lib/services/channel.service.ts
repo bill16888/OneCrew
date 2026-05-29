@@ -192,6 +192,102 @@ export async function removeMember(
 }
 
 /**
+ * Maximum length (UTF-16 code units) of a channel knowledge card,
+ * mirroring the message-content cap so one card cannot dominate the AI
+ * context budget. Enforced by {@link setKnowledge} (Req 19.2).
+ */
+export const KNOWLEDGE_MAX_LENGTH = 8000;
+
+/**
+ * Total knowledge budget (chars) folded into a single AI cycle across
+ * all of an AI's channels (Req 19.8). The runtime stops appending
+ * cards once this is reached and emits an omission marker.
+ */
+export const KNOWLEDGE_INJECTION_BUDGET = 12000;
+
+/**
+ * Validation error for knowledge writes over the cap. Kept local to
+ * avoid a cross-service dependency; route handlers translate it to
+ * HTTP 400 via `instanceof`.
+ */
+export class KnowledgeValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'KnowledgeValidationError';
+  }
+}
+
+/**
+ * Read a channel's knowledge card. Returns `null` when unset. The
+ * caller is responsible for confirming the channel is in the active
+ * workspace (the API route does this).
+ *
+ * Validates: Req 19.3.
+ */
+export async function getKnowledge(channelId: string): Promise<string | null> {
+  const channel = await prisma.channel.findUnique({
+    where: { id: channelId },
+    select: { knowledge: true },
+  });
+  return channel?.knowledge ?? null;
+}
+
+/**
+ * Replace a channel's knowledge card. An empty string clears it. Throws
+ * {@link KnowledgeValidationError} when over the cap; nothing is
+ * persisted in that case.
+ *
+ * Validates: Req 19.2, 19.4.
+ */
+export async function setKnowledge(
+  channelId: string,
+  content: string,
+): Promise<void> {
+  if (content.length > KNOWLEDGE_MAX_LENGTH) {
+    throw new KnowledgeValidationError(
+      `Knowledge exceeds the ${KNOWLEDGE_MAX_LENGTH}-character limit.`,
+    );
+  }
+  await prisma.channel.update({
+    where: { id: channelId },
+    data: { knowledge: content },
+  });
+}
+
+/** A channel's name + its non-empty knowledge, for runtime injection. */
+export interface ChannelKnowledge {
+  name: string;
+  knowledge: string;
+}
+
+/**
+ * Batch-read the knowledge cards of every channel `aiUserId` is a
+ * member of within `workspaceId`, skipping channels with no card. One
+ * query; ordered by channel name for deterministic injection order.
+ *
+ * Validates: Req 19.6, 19.7 (member-scoped, non-empty only).
+ */
+export async function getKnowledgeForMemberChannels(
+  workspaceId: string,
+  aiUserId: string,
+): Promise<ChannelKnowledge[]> {
+  const channels = await prisma.channel.findMany({
+    where: {
+      workspaceId,
+      knowledge: { not: null },
+      members: { some: { userId: aiUserId } },
+    },
+    select: { name: true, knowledge: true },
+    orderBy: { name: 'asc' },
+  });
+  return channels
+    .filter((c): c is { name: string; knowledge: string } =>
+      typeof c.knowledge === 'string' && c.knowledge.trim().length > 0,
+    )
+    .map((c) => ({ name: c.name, knowledge: c.knowledge }));
+}
+
+/**
  * Aggregated namespace export so callers can use either named imports
  * or the `ChannelService.method(...)` style favored across the spec.
  */
@@ -202,4 +298,7 @@ export const ChannelService = {
   listMembers,
   addMember,
   removeMember,
+  getKnowledge,
+  setKnowledge,
+  getKnowledgeForMemberChannels,
 } as const;

@@ -48,6 +48,7 @@ model User {
 model Channel {
   id          String          @id @default(cuid())
   name        String
+  knowledge   String?         @db.Text // 频道知识卡片 (Channel Knowledge, Req 19)
   workspaceId String
   workspace   Workspace       @relation(fields: [workspaceId], references: [id])
   messages    Message[]
