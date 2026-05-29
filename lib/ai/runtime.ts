@@ -52,6 +52,7 @@ import { logger } from '@/lib/logger';
 import prisma from '@/lib/prisma';
 import { EVENTS } from '@/lib/realtime/events';
 import { getIO } from '@/lib/realtime/io';
+import { markThinking } from '@/lib/realtime/thinking';
 import { ChannelService } from '@/lib/services/channel.service';
 import { MessageService } from '@/lib/services/message.service';
 import { resolveWorkspaceId } from '@/lib/workspace';
@@ -232,6 +233,12 @@ export interface RunCycleResult {
  * to satisfy Property 24 (Requirements 7.6, 7.7).
  */
 function emitThinking(aiUserId: string, state: boolean): void {
+  // Keep the process-local snapshot in lock-step with the broadcast so
+  // the dashboard (Phase 1 Req 13.2) can read current thinking state at
+  // page-load time, before any socket event arrives. This runs even
+  // when no IO server is wired (tests), which is harmless.
+  markThinking(aiUserId, state);
+
   const io = getIO();
   if (!io) return;
   const room = `workspace:${resolveWorkspaceId()}`;

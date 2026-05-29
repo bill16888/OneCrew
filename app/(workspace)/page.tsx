@@ -1,20 +1,20 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { ArrowRight, Hash, LayoutGrid } from 'lucide-react';
 import { AIBadge } from '@/components/ui/AIBadge';
+import { env } from '@/lib/env';
 
 /**
  * Workspace home (`/`) — the landing view inside the `(workspace)` route
  * group. Sits alongside the sidebar from `(workspace)/layout.tsx`.
  *
- * Task 2.3 keeps this intentionally lightweight: a welcome banner plus
- * direct entry points to the default channels and the kanban board. No
- * data fetching here — the sidebar already lists channels and the real
- * channel page is built in task 2.4.
- *
- * Visual: dark canvas (#0A0A0A) inherited from the root layout; cards
- * sit on the slightly raised `bg-surface` (#111113) for contrast
- * (Requirement 9.1).
+ * When `DASHBOARD_ENABLED` is true (Phase 1 Req 13.1) this route
+ * redirects to `/dashboard`, the operator command center. The
+ * lightweight welcome view below is the fallback for deployments that
+ * have not opted into the dashboard yet. Direct links to `/board` and
+ * `/channels/...` are unaffected either way.
  */
+export const dynamic = 'force-dynamic';
 
 interface ChannelEntry {
   id: string;
@@ -30,6 +30,9 @@ const FEATURED_CHANNELS: readonly ChannelEntry[] = [
 ];
 
 export default function WorkspaceHomePage() {
+  if (env.DASHBOARD_ENABLED) {
+    redirect('/dashboard');
+  }
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-10 px-8 py-12">
       <header className="flex flex-col gap-3">
