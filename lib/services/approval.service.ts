@@ -34,6 +34,7 @@
 import type { Approval, Prisma } from '@prisma/client';
 
 import { agenticEmitter } from '@/lib/loop/emitter';
+import { notifyApprovalPending } from '@/lib/notifications/server';
 import prisma from '@/lib/prisma';
 import {
   EVENTS,
@@ -173,6 +174,21 @@ export async function create(
 
   // Persistence committed — safe to broadcast.
   broadcastApprovalCreated(approval);
+
+  // Surface a desktop/in-app notification for the operator (Req 18.2).
+  // Best-effort: a missing IO server no-ops. We resolve the AI's name
+  // lazily and tolerate a missing user (fall back to the id) so the
+  // notification never blocks or breaks the committed approval.
+  try {
+    const aiUser = await prisma.user.findUnique({
+      where: { id: input.aiUserId },
+      select: { name: true },
+    });
+    notifyApprovalPending(input.action, aiUser?.name ?? input.aiUserId);
+  } catch {
+    // Notification is a nicety; ignore lookup failures.
+  }
+
   return approval;
 }
 

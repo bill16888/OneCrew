@@ -7,6 +7,8 @@ import {
   type AIUserDirectory,
 } from '@/components/approval/ApprovalCenter';
 import { MobileHeader } from '@/components/layout/MobileHeader';
+import { NotificationPermissionBanner } from '@/components/notifications/NotificationPermissionBanner';
+import { NotificationProvider } from '@/components/notifications/NotificationProvider';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { authOptions } from '@/lib/auth/options';
 import prisma from '@/lib/prisma';
@@ -137,6 +139,7 @@ export default async function WorkspaceLayout({
     <div className="flex h-screen w-full flex-col bg-background text-foreground md:flex-row">
       <Sidebar />
       <div className="flex min-h-0 flex-1 flex-col">
+        <NotificationPermissionBanner />
         <MobileHeader userInitial={userInitialSource.charAt(0)} />
         <main className="flex-1 overflow-y-auto">{children}</main>
       </div>
@@ -144,6 +147,7 @@ export default async function WorkspaceLayout({
         initialPending={initialPending}
         aiDirectory={aiDirectory}
       />
+      <NotificationProvider />
     </div>
   );
 }

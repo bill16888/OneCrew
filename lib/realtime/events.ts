@@ -33,6 +33,14 @@ export const EVENTS = {
   AIThinking: 'ai:thinking',
   /** Emitted to `workspace:{WORKSPACE_ID}` after an Approval is created. */
   ApprovalCreated: 'approval:created',
+  /**
+   * Emitted to `workspace:{WORKSPACE_ID}` when something happens the
+   * operator may want a desktop notification for: a new pending
+   * approval, a task moving to Done, or the AI budget breaker tripping
+   * (Phase 1 Req 18). Distinct from the data events above — clients use
+   * it purely to surface a `Notification`, not to mutate UI state.
+   */
+  NotificationNew: 'notification:new',
 } as const;
 
 /** Union of all realtime event name string literals. */
@@ -129,6 +137,27 @@ export interface ApprovalCreatedPayload {
 }
 
 /**
+ * Payload broadcast on `notification:new` (Phase 1 Req 18).
+ *
+ * A lightweight, UI-only signal telling the client to surface a desktop
+ * + in-app notification. `category` lets the client throttle and dedupe
+ * by kind (Req 18.3 / 18.4); `href` is the in-app route to focus when
+ * the notification is clicked (Req 18.5).
+ */
+export interface NotificationNewPayload {
+  /** Dedup/throttle key family. */
+  category: 'approval' | 'task_done' | 'budget';
+  /** Short notification title. */
+  title: string;
+  /** Notification body text. */
+  body: string;
+  /** In-app route to navigate to on click (e.g. `/board`, `/dashboard`). */
+  href: string;
+  /** ISO 8601 timestamp string. */
+  createdAt: string;
+}
+
+/**
  * Mapping from event name to its payload type. Useful for typed `emit` /
  * `on` helpers in the Socket.io layer.
  */
@@ -137,19 +166,21 @@ export interface EventPayloads {
   [EVENTS.TaskUpdated]: TaskUpdatedPayload;
   [EVENTS.AIThinking]: AIThinkingPayload;
   [EVENTS.ApprovalCreated]: ApprovalCreatedPayload;
+  [EVENTS.NotificationNew]: NotificationNewPayload;
 }
 
 /**
  * Server → client event signatures, suitable for
  * `Server<ListenEvents, EmitEvents>` from `socket.io`. Each property is a
  * listener signature receiving the payload; emitters infer payload types
- * from this map. These four are the only events the server emits.
+ * from this map.
  */
 export interface ServerToClientEvents {
   [EVENTS.MessageNew]: (payload: MessageNewPayload) => void;
   [EVENTS.TaskUpdated]: (payload: TaskUpdatedPayload) => void;
   [EVENTS.AIThinking]: (payload: AIThinkingPayload) => void;
   [EVENTS.ApprovalCreated]: (payload: ApprovalCreatedPayload) => void;
+  [EVENTS.NotificationNew]: (payload: NotificationNewPayload) => void;
 }
 
 /**
