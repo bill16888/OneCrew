@@ -23,6 +23,7 @@
 
 import type { Task } from '@prisma/client';
 
+import { notifyTaskDone } from '@/lib/notifications/server';
 import prisma from '@/lib/prisma';
 import { EVENTS, type TaskUpdatedPayload } from '@/lib/realtime/events';
 import { getIO } from '@/lib/realtime/io';
@@ -263,6 +264,13 @@ export async function updateStatus(
   });
 
   broadcastTaskUpdated(task);
+
+  // Notify the operator when a task reaches Done (Phase 1 Req 18.2).
+  // Best-effort, post-commit; no-ops when no IO server is wired.
+  if (task.status === 'Done') {
+    notifyTaskDone(task.taskId, task.title);
+  }
+
   return task;
 }
 

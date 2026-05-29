@@ -53,6 +53,7 @@ import prisma from '@/lib/prisma';
 import { EVENTS } from '@/lib/realtime/events';
 import { getIO } from '@/lib/realtime/io';
 import { markThinking } from '@/lib/realtime/thinking';
+import { notifyBudgetExceeded } from '@/lib/notifications/server';
 import { ChannelService } from '@/lib/services/channel.service';
 import { MessageService } from '@/lib/services/message.service';
 import { resolveWorkspaceId } from '@/lib/workspace';
@@ -531,6 +532,8 @@ export async function runCycle(
             level: 'warning',
             extra: { ...budget.getStats(), aiUserId },
           });
+          // Desktop/in-app notification for the operator (Req 18.2).
+          notifyBudgetExceeded();
           await postBudgetExceededNotice(aiUserId, workspaceId);
           finishReason = 'budget_exceeded';
           break;
