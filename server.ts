@@ -55,6 +55,7 @@ import { env } from './lib/env';
 import { logger } from './lib/logger';
 import { AgenticLoop } from './lib/loop/agentic-loop';
 import { createIOServer } from './lib/realtime/io';
+import { startDailyReportScheduler } from './lib/reports/daily';
 
 /** Whether Next.js should run in development mode (HMR, source maps, etc.). */
 const dev = env.NODE_ENV !== 'production';
@@ -142,6 +143,12 @@ async function bootstrap(): Promise<void> {
     // torn down by `stop()` in the shutdown handler below.
     AgenticLoop.start(io);
 
+    // Boot the daily-report scheduler alongside the Agentic Loop. It
+    // self-skips (logs + no-op handle) when DAILY_REPORTS_ENABLED is
+    // false, so this call is safe in every environment. Held so the
+    // shutdown handler can stop the cron cleanly.
+    const dailyReports = startDailyReportScheduler();
+
     httpServer.listen(port, hostname, () => {
       // eslint-disable-next-line no-console
       console.log(`> Ready on http://${hostname}:${port}`);
@@ -177,6 +184,11 @@ async function bootstrap(): Promise<void> {
       // `ai:thinking{state:false}` broadcast still flows because we
       // close Socket.io after this call.
       AgenticLoop.stop();
+
+      // Detach the daily-report cron so no new report batch fires
+      // during shutdown. In-flight report cycles finish on their own
+      // (they run through runCycle's normal lifecycle).
+      dailyReports.stop();
 
       // Close Socket.io first to stop emitting new events, then close the
       // underlying HTTP server. Both calls are async; we exit after the

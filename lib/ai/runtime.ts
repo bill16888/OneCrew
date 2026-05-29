@@ -269,6 +269,7 @@ function emitThinking(aiUserId: string, state: boolean): void {
  */
 async function buildInitialContext(
   workspaceId: string,
+  extraInstruction?: string,
 ): Promise<MessageParam[]> {
   const lookbackStart = new Date(Date.now() - RECENT_MESSAGE_LOOKBACK_MS);
 
@@ -340,7 +341,11 @@ async function buildInitialContext(
   const content =
     `Available channels (use the literal id when calling send_channel_message):\n${channelDigest}\n\n` +
     `Recent channel digest:\n${messageDigest}\n\n` +
-    `In-progress tasks:\n${taskDigest}`;
+    `In-progress tasks:\n${taskDigest}` +
+    // Phase 1 Req 15: an optional caller-supplied instruction (e.g. the
+    // end-of-day daily-report ask) is appended AFTER the situational
+    // digest so the model has full context before acting on it.
+    (extraInstruction ? `\n\n---\n${extraInstruction}` : '');
 
   return [{ role: 'user', content }];
 }
@@ -419,7 +424,24 @@ function isToolUseBlock(block: { type: string }): block is ToolUseBlock {
  *   surfaced (rather than swallowed) so the Agentic Loop can log them
  *   distinctly from in-cycle failures.
  */
-export async function runCycle(aiUserId: string): Promise<RunCycleResult> {
+/**
+ * Options accepted by {@link runCycle}.
+ */
+export interface RunCycleOptions {
+  /**
+   * An extra instruction appended to the initial context after the
+   * recent-activity digest. Used by the daily-report scheduler
+   * (`lib/reports/daily.ts`, Phase 1 Req 15) to ask the AI to produce
+   * a structured report and post it via `send_channel_message`. When
+   * omitted the cycle behaves exactly as the periodic/wakeup path.
+   */
+  readonly extraInstruction?: string;
+}
+
+export async function runCycle(
+  aiUserId: string,
+  options: RunCycleOptions = {},
+): Promise<RunCycleResult> {
   const start = Date.now();
 
   // 1. Resolve the AI user and validate it. We do this *before*
@@ -454,8 +476,12 @@ export async function runCycle(aiUserId: string): Promise<RunCycleResult> {
 
   try {
     // 3. Seed the conversation with a digest of recent activity so the
-    //    model has fresh context on round 1.
-    const messages: MessageParam[] = await buildInitialContext(workspaceId);
+    //    model has fresh context on round 1. A caller-supplied
+    //    `extraInstruction` (daily report) is appended after the digest.
+    const messages: MessageParam[] = await buildInitialContext(
+      workspaceId,
+      options.extraInstruction,
+    );
 
     // 4. Multi-round tool_use loop. The cap is the loop guard itself —
     //    no manual decrement / break needed for the cap case.
