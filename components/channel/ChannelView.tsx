@@ -5,6 +5,7 @@ import { Hash } from 'lucide-react';
 
 import { MessageRow } from '@/components/channel/MessageRow';
 import { MessageComposer } from '@/components/channel/MessageComposer';
+import { ChannelKnowledgeCard } from '@/components/channel/ChannelKnowledgeCard';
 import {
   getClientSocket,
   subscribeToChannel,
@@ -243,6 +244,7 @@ export function ChannelView({
   return (
     <div className="flex h-full flex-col">
       <ChannelHeader channelId={channelId} />
+      <ChannelKnowledgeCard channelId={channelId} />
 
       <ol
         aria-label={`Messages in #${channelId}`}

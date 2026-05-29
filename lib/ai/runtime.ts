@@ -54,7 +54,10 @@ import { EVENTS } from '@/lib/realtime/events';
 import { getIO } from '@/lib/realtime/io';
 import { markThinking } from '@/lib/realtime/thinking';
 import { notifyBudgetExceeded } from '@/lib/notifications/server';
-import { ChannelService } from '@/lib/services/channel.service';
+import {
+  ChannelService,
+  KNOWLEDGE_INJECTION_BUDGET,
+} from '@/lib/services/channel.service';
 import { MessageService } from '@/lib/services/message.service';
 import { resolveWorkspaceId } from '@/lib/workspace';
 
@@ -218,6 +221,13 @@ export interface RunCycleResult {
   readonly finishReason: FinishReason;
   /** Wall-clock duration from cycle start to cycle end, in ms. */
   readonly durationMs: number;
+  /**
+   * Whether this cycle folded any channel knowledge cards into its
+   * initial context (Req 19.12 observability). Surfaced in the
+   * cycle-finished log so operators can confirm knowledge is reaching
+   * the model.
+   */
+  readonly injectedKnowledge: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -277,43 +287,49 @@ function emitThinking(aiUserId: string, state: boolean): void {
  */
 async function buildInitialContext(
   workspaceId: string,
+  aiUserId: string,
   extraInstruction?: string,
-): Promise<MessageParam[]> {
+): Promise<{ messages: MessageParam[]; injectedKnowledge: boolean }> {
   const lookbackStart = new Date(Date.now() - RECENT_MESSAGE_LOOKBACK_MS);
 
-  // The three reads are independent and pure (read-only); fire them in
+  // The reads are independent and pure (read-only); fire them in
   // parallel so the cycle's startup latency is bounded by the slowest
   // of the queries rather than their sum.
-  const [recentMessages, inProgressTasks, allChannels] = await Promise.all([
-    prisma.message.findMany({
-      where: {
-        createdAt: { gte: lookbackStart },
-        channel: { workspaceId },
-      },
-      orderBy: { createdAt: 'asc' },
-      take: RECENT_MESSAGE_LIMIT,
-      include: {
-        user: { select: { name: true, isAI: true } },
-        channel: { select: { name: true } },
-      },
-    }),
-    prisma.task.findMany({
-      where: { workspaceId, status: 'InProgress' },
-      orderBy: { createdAt: 'asc' },
-      include: { assignee: { select: { name: true } } },
-    }),
-    // Pulling every channel in the workspace is cheap (the MVP keeps
-    // the channel set tiny) and lets us inject a *concrete* channel
-    // directory into the initial prompt so the model never has to
-    // guess `channelId` arguments for `send_channel_message`. Without
-    // this, the AI invented IDs like `general` (instead of the seeded
-    // `chan_general`), tripping the `Message_channelId_fkey` FK.
-    prisma.channel.findMany({
-      where: { workspaceId },
-      orderBy: { name: 'asc' },
-      select: { id: true, name: true },
-    }),
-  ]);
+  const [recentMessages, inProgressTasks, allChannels, knowledgeCards] =
+    await Promise.all([
+      prisma.message.findMany({
+        where: {
+          createdAt: { gte: lookbackStart },
+          channel: { workspaceId },
+        },
+        orderBy: { createdAt: 'asc' },
+        take: RECENT_MESSAGE_LIMIT,
+        include: {
+          user: { select: { name: true, isAI: true } },
+          channel: { select: { name: true } },
+        },
+      }),
+      prisma.task.findMany({
+        where: { workspaceId, status: 'InProgress' },
+        orderBy: { createdAt: 'asc' },
+        include: { assignee: { select: { name: true } } },
+      }),
+      // Pulling every channel in the workspace is cheap (the MVP keeps
+      // the channel set tiny) and lets us inject a *concrete* channel
+      // directory into the initial prompt so the model never has to
+      // guess `channelId` arguments for `send_channel_message`. Without
+      // this, the AI invented IDs like `general` (instead of the seeded
+      // `chan_general`), tripping the `Message_channelId_fkey` FK.
+      prisma.channel.findMany({
+        where: { workspaceId },
+        orderBy: { name: 'asc' },
+        select: { id: true, name: true },
+      }),
+      // Req 19: knowledge cards of the channels this AI is a member of.
+      // Member-scoped (not the whole workspace) so an AI only "knows"
+      // the projects it participates in, leveraging Phase 1 Req 17.
+      ChannelService.getKnowledgeForMemberChannels(workspaceId, aiUserId),
+    ]);
 
   const messageDigest =
     recentMessages.length === 0
@@ -346,7 +362,16 @@ async function buildInitialContext(
           .map((c) => `- id="${c.id}" name="#${c.name}"`)
           .join('\n');
 
+  // Req 19.6-19.8: assemble member-channel knowledge cards under a
+  // single heading, in channel-name order (the query already sorts),
+  // accumulating until the total budget is reached. Over-budget cards
+  // are dropped with an explicit omission marker so the model knows the
+  // context is partial rather than silently truncated.
+  const knowledgeBlock = buildKnowledgeBlock(knowledgeCards);
+  const injectedKnowledge = knowledgeBlock.length > 0;
+
   const content =
+    (injectedKnowledge ? `${knowledgeBlock}\n\n---\n` : '') +
     `Available channels (use the literal id when calling send_channel_message):\n${channelDigest}\n\n` +
     `Recent channel digest:\n${messageDigest}\n\n` +
     `In-progress tasks:\n${taskDigest}` +
@@ -355,7 +380,39 @@ async function buildInitialContext(
     // digest so the model has full context before acting on it.
     (extraInstruction ? `\n\n---\n${extraInstruction}` : '');
 
-  return [{ role: 'user', content }];
+  return { messages: [{ role: 'user', content }], injectedKnowledge };
+}
+
+/**
+ * Assemble member-channel knowledge cards into a single `## 频道知识`
+ * block, bounded by {@link KNOWLEDGE_INJECTION_BUDGET}. Returns an empty
+ * string when there are no cards (Req 19.7). Cards beyond the budget
+ * are omitted with a trailing marker (Req 19.8).
+ *
+ * Exported for unit testing the bounding / omission logic.
+ */
+export function buildKnowledgeBlock(
+  cards: ReadonlyArray<{ name: string; knowledge: string }>,
+): string {
+  if (cards.length === 0) return '';
+
+  const sections: string[] = [];
+  let used = 0;
+  let omitted = 0;
+  for (const card of cards) {
+    const section = `### #${card.name}\n${card.knowledge.trim()}`;
+    if (used + section.length > KNOWLEDGE_INJECTION_BUDGET) {
+      omitted++;
+      continue;
+    }
+    sections.push(section);
+    used += section.length;
+  }
+
+  if (sections.length === 0) return '';
+  const omissionNote =
+    omitted > 0 ? `\n\n(…${omitted} more channel card(s) omitted)` : '';
+  return `## 频道知识\n${sections.join('\n\n')}${omissionNote}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -477,6 +534,7 @@ export async function runCycle(
 
   let rounds = 0;
   let finishReason: FinishReason | null = null;
+  let injectedKnowledge = false;
 
   // 2. Announce the cycle start to the workspace room. The matching
   //    `state: false` is emitted in `finally` exactly once.
@@ -486,10 +544,13 @@ export async function runCycle(
     // 3. Seed the conversation with a digest of recent activity so the
     //    model has fresh context on round 1. A caller-supplied
     //    `extraInstruction` (daily report) is appended after the digest.
-    const messages: MessageParam[] = await buildInitialContext(
+    const built = await buildInitialContext(
       workspaceId,
+      aiUserId,
       options.extraInstruction,
     );
+    const messages: MessageParam[] = built.messages;
+    injectedKnowledge = built.injectedKnowledge;
 
     // 4. Multi-round tool_use loop. The cap is the loop guard itself —
     //    no manual decrement / break needed for the cap case.
@@ -611,6 +672,7 @@ export async function runCycle(
     // either we set it inside the loop, after the loop, or in catch.
     finishReason: finishReason as FinishReason,
     durationMs: Date.now() - start,
+    injectedKnowledge,
   };
 
   // Structured cycle-summary log (Requirement 10.5). The shape mirrors
