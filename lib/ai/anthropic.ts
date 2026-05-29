@@ -51,8 +51,7 @@ import type {
   ChatCompletionTool,
 } from 'openai/resources/chat/completions';
 
-import { env } from '@/lib/env';
-
+import { resolveProvider } from './providers';
 import {
   type AnthropicLikeMessage,
   type AnthropicLikeMessageCreateParamsNonStreaming,
@@ -150,29 +149,38 @@ export interface CallAnthropicWithRetryOptions {
 }
 
 /**
- * Module-level DeepSeek client singleton (OpenAI-compatible).
+ * Module-level chat client singleton (OpenAI-compatible).
  *
- * Reads the API key + base URL from the validated environment (see
- * `lib/env.ts`); validation happens eagerly at process boot, so a
- * missing / malformed `DEEPSEEK_API_KEY` causes the server to crash
- * with a clear `❌ Missing env vars` diagnostic instead of surfacing
- * as an opaque runtime 401 from the AI runtime.
+ * The concrete provider — DeepSeek (default), OpenAI, or a custom
+ * OpenAI-compatible gateway — is selected by `AI_PROVIDER` and
+ * resolved by `resolveProvider()` (see `lib/ai/providers.ts`).
+ * Because all three speak the OpenAI Chat Completions wire format,
+ * the same `openai` SDK serves every provider; only the `baseURL` /
+ * `apiKey` differ.
  *
- * `baseURL` defaults to `https://api.deepseek.com` (set in
- * `lib/env.ts`); override via `DEEPSEEK_BASE_URL` in the environment
- * to point at a self-hosted DeepSeek-compatible gateway.
+ * The active provider's API key is validated eagerly at process boot
+ * by `lib/env.ts` (conditional `superRefine`), so a missing key fails
+ * fast with a clear `❌ Missing env vars` diagnostic instead of an
+ * opaque runtime 401.
+ *
+ * The export name `deepseekClient` is retained for backward
+ * compatibility (tests + `runtime.ts` reference it); it now points at
+ * whichever provider `AI_PROVIDER` selects.
  */
+const provider = resolveProvider();
+
 export const deepseekClient = new OpenAI({
-  apiKey: env.DEEPSEEK_API_KEY,
-  baseURL: env.DEEPSEEK_BASE_URL,
+  apiKey: provider.apiKey,
+  baseURL: provider.baseURL,
 });
 
 /**
- * Identifier of the chat model the runtime targets, sourced from
- * `env.DEEPSEEK_MODEL` (default `deepseek-chat`). Override the env var
- * to switch to e.g. `deepseek-reasoner` without redeploying.
+ * Identifier of the chat model the runtime targets, sourced from the
+ * active provider's configuration (DeepSeek `deepseek-chat`, OpenAI
+ * `gpt-4o-mini`, or the custom gateway's `AI_PROVIDER_MODEL`).
+ * Override per-provider via the corresponding `*_MODEL` env var.
  */
-export const MODEL: string = env.DEEPSEEK_MODEL;
+export const MODEL: string = provider.model;
 
 /**
  * Invoke the chat completion endpoint with bounded exponential backoff.

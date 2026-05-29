@@ -106,9 +106,34 @@ function normaliseProcessEnv(): void {
  *                                  (defaults to `'development'`)
  */
 const envSchema = z.object({
+  /**
+   * Active chat provider (Phase 1 Req 14). All three speak the OpenAI
+   * Chat Completions wire format, so the runtime's existing
+   * OpenAI-compatible client + Anthropic-shape bridge work unchanged
+   * across providers:
+   *   - `deepseek` (default) — DeepSeek's hosted API.
+   *   - `openai`             — OpenAI's API (or Azure OpenAI).
+   *   - `custom`             — any OpenAI-compatible gateway (local
+   *     vLLM / Ollama / LiteLLM / self-hosted), configured via the
+   *     `AI_PROVIDER_*` vars below.
+   *
+   * NOTE: native Anthropic (Claude) is NOT yet a value — its API is
+   * not OpenAI-compatible and needs a separate adapter (tracked as a
+   * Phase 1 follow-up). Point `custom` at an OpenAI-compatible Claude
+   * proxy if you need Claude today.
+   *
+   * The active provider's API key is required at boot (see the
+   * `superRefine` below) so a misconfiguration fails fast rather than
+   * surfacing as an opaque 401 inside the AI runtime.
+   */
+  AI_PROVIDER: z.enum(['deepseek', 'openai', 'custom']).default('deepseek'),
+
+  // DeepSeek API key is optional at the schema level and conditionally
+  // required by the superRefine when AI_PROVIDER=deepseek. This lets an
+  // operator who switched to OpenAI omit the DeepSeek key entirely.
   DEEPSEEK_API_KEY: z
-    .string({ required_error: 'DEEPSEEK_API_KEY is required' })
-    .min(1, 'DEEPSEEK_API_KEY must not be empty'),
+    .preprocess(emptyStringToUndefined, z.string().min(1).optional())
+    .default(''),
 
   DEEPSEEK_BASE_URL: z
     .string()
@@ -116,6 +141,31 @@ const envSchema = z.object({
     .default('https://api.deepseek.com'),
 
   DEEPSEEK_MODEL: z.string().min(1).default('deepseek-chat'),
+
+  // OpenAI (and Azure OpenAI) configuration. Base URL defaults to the
+  // public OpenAI endpoint; override for Azure or a gateway.
+  OPENAI_API_KEY: z
+    .preprocess(emptyStringToUndefined, z.string().min(1).optional())
+    .default(''),
+
+  OPENAI_BASE_URL: z.string().min(1).default('https://api.openai.com/v1'),
+
+  OPENAI_MODEL: z.string().min(1).default('gpt-4o-mini'),
+
+  // Generic OpenAI-compatible gateway (AI_PROVIDER=custom). Base URL
+  // and model have no sensible default, so they are required by the
+  // superRefine when this provider is selected.
+  AI_PROVIDER_API_KEY: z
+    .preprocess(emptyStringToUndefined, z.string().min(1).optional())
+    .default(''),
+
+  AI_PROVIDER_BASE_URL: z
+    .preprocess(emptyStringToUndefined, z.string().min(1).optional())
+    .default(''),
+
+  AI_PROVIDER_MODEL: z
+    .preprocess(emptyStringToUndefined, z.string().min(1).optional())
+    .default(''),
 
   DATABASE_URL: z
     .preprocess(
@@ -276,7 +326,60 @@ const envSchema = z.object({
   NODE_ENV: z
     .enum(['development', 'production', 'test'])
     .default('development'),
-});
+})
+  .superRefine((value, ctx) => {
+    // Conditionally require the active provider's API key (and, for
+    // the custom gateway, its base URL + model) so a provider
+    // misconfiguration fails fast at boot rather than as a runtime
+    // 401 inside the AI runtime (Phase 1 Req 14.2).
+    switch (value.AI_PROVIDER) {
+      case 'deepseek':
+        if (!value.DEEPSEEK_API_KEY) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['DEEPSEEK_API_KEY'],
+            message:
+              'DEEPSEEK_API_KEY is required when AI_PROVIDER=deepseek (the default).',
+          });
+        }
+        break;
+      case 'openai':
+        if (!value.OPENAI_API_KEY) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['OPENAI_API_KEY'],
+            message: 'OPENAI_API_KEY is required when AI_PROVIDER=openai.',
+          });
+        }
+        break;
+      case 'custom':
+        if (!value.AI_PROVIDER_API_KEY) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['AI_PROVIDER_API_KEY'],
+            message:
+              'AI_PROVIDER_API_KEY is required when AI_PROVIDER=custom.',
+          });
+        }
+        if (!value.AI_PROVIDER_BASE_URL) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['AI_PROVIDER_BASE_URL'],
+            message:
+              'AI_PROVIDER_BASE_URL is required when AI_PROVIDER=custom.',
+          });
+        }
+        if (!value.AI_PROVIDER_MODEL) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['AI_PROVIDER_MODEL'],
+            message:
+              'AI_PROVIDER_MODEL is required when AI_PROVIDER=custom.',
+          });
+        }
+        break;
+    }
+  });
 
 /** Inferred type of the validated environment. */
 export type Env = z.infer<typeof envSchema>;
