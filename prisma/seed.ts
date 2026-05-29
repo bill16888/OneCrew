@@ -1,20 +1,25 @@
 /**
  * AI-Native Team Workspace — Database seed script.
  *
- * Provisions the hardcoded single workspace required by the MVP:
- *   - 1 Workspace (id from `process.env.WORKSPACE_ID`, default `ws_default`)
- *   - 3 human users with bcrypt-hashed passwords (demo credentials)
- *   - 2 AI colleagues: `Ada` (AI Engineer) and `Hopper` (AI Project Manager),
- *     both with `isAI = true`, `passwordHash = null`, distinct `aiRole`
+ * Provisions the single workspace required by the MVP. Every
+ * brand-identifying value (workspace name, AI colleague names, email
+ * domain) is read from environment configuration so the codebase ships
+ * no hard-coded brand (Phase 1 Req 16). Development falls back to the
+ * legacy `Helio` / `Ada` / `Hopper` / `helio.local` values so local
+ * dev and e2e keep working unchanged; production refuses to seed
+ * without explicit configuration (mirrors the SEED_HUMAN_PASSWORD
+ * discipline from audit M5).
+ *
+ *   - 1 Workspace (id from `WORKSPACE_ID`, name from `WORKSPACE_NAME`)
+ *   - 3 human users with bcrypt-hashed passwords
+ *   - N AI colleagues from `AI_AGENT_NAMES_JSON` (default: 2)
  *   - 2 default channels: `#general` and `#engineering`
  *
- * All writes use `upsert` to remain idempotent across re-runs (humans match by
- * `email`, AIs match by `email`, the workspace and channels match by `id`).
+ * All writes use `upsert` to remain idempotent across re-runs.
  *
- * Run via `npm run prisma:seed` or `npx prisma db seed` (the `prisma.seed`
- * field is configured in `package.json`).
+ * Run via `npm run prisma:seed` or `npx prisma db seed`.
  *
- * Validates: Requirements 1.6, 4.1, 4.3
+ * Validates: Requirements 1.6, 4.1, 4.3; Phase 1 Req 16.1, 16.2.
  */
 
 import { PrismaClient, type Prisma } from '@prisma/client';
@@ -22,28 +27,77 @@ import { hashSync } from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+
 /** Workspace identifier — keep aligned with `.env` `WORKSPACE_ID`. */
 const WORKSPACE_ID: string = process.env.WORKSPACE_ID ?? 'ws_default';
-const WORKSPACE_NAME = 'Helio Demo Workspace';
+
+/**
+ * Legacy development defaults. These reproduce the pre-decoupling
+ * fixture EXACTLY so local dev + e2e (`mia@helio.local` / Ada / Hopper)
+ * keep working without any env configuration. Production never uses
+ * these — see {@link requireProd}.
+ */
+const DEV_WORKSPACE_NAME = 'Helio Demo Workspace';
+const DEV_EMAIL_DOMAIN = 'helio.local';
+const DEV_AGENTS_JSON = JSON.stringify([
+  {
+    id: 'user_ai_ada',
+    name: 'Ada',
+    aiRole: 'Ada',
+    mentionAliases: ['艾达', '阿达', 'ada'],
+  },
+  {
+    id: 'user_ai_hopper',
+    name: 'Hopper',
+    aiRole: 'Hopper',
+    mentionAliases: ['霍珀', '霍普', '哈珀', '哈柏', 'hopper'],
+  },
+]);
+
+/**
+ * Resolve a brand value from env, falling back to the dev default.
+ * In production, a missing env var is fatal — we refuse to silently
+ * seed the demo brand into a real deployment.
+ */
+function resolveBrandValue(
+  envKey: string,
+  devDefault: string,
+  label: string,
+): string {
+  const fromEnv = process.env[envKey]?.trim();
+  if (fromEnv && fromEnv.length > 0) return fromEnv;
+  if (IS_PRODUCTION) {
+    throw new Error(
+      `${envKey} must be set when NODE_ENV=production. Refusing to seed the demo ${label}.`,
+    );
+  }
+  return devDefault;
+}
+
+const WORKSPACE_NAME = resolveBrandValue(
+  'WORKSPACE_NAME',
+  DEV_WORKSPACE_NAME,
+  'workspace name',
+);
+const EMAIL_DOMAIN = resolveBrandValue(
+  'SEED_EMAIL_DOMAIN',
+  DEV_EMAIL_DOMAIN,
+  'email domain',
+);
 
 /**
  * Demo password shared by every seeded human user.
  *
  * Resolution order:
- *   1. `SEED_HUMAN_PASSWORD` env var — required for any deployment
- *      that ships seeded accounts to a real environment.
- *   2. Falls back to `'password123'` ONLY when `NODE_ENV !==
- *      'production'`. In production a missing env var is a fatal
- *      configuration error so we refuse to silently ship a known
- *      credential (audit finding M5).
- *
- * Documented in `README.md`. Operators MUST rotate this immediately
- * after the first production deploy.
+ *   1. `SEED_HUMAN_PASSWORD` env var.
+ *   2. Falls back to `'password123'` ONLY in development. Production
+ *      throws (audit finding M5).
  */
 function resolveSeedPassword(): string {
   const fromEnv = process.env.SEED_HUMAN_PASSWORD?.trim();
   if (fromEnv && fromEnv.length > 0) return fromEnv;
-  if (process.env.NODE_ENV === 'production') {
+  if (IS_PRODUCTION) {
     throw new Error(
       'SEED_HUMAN_PASSWORD must be set when NODE_ENV=production. Refusing to seed with the demo default.',
     );
@@ -56,22 +110,23 @@ function resolveSeedPassword(): string {
 }
 
 /**
- * bcrypt cost factor. OWASP 2024 guidance recommends `>= 12` for
- * web applications; single sign-in latency on a modern CPU stays
- * well under 200 ms (audit finding M6).
+ * bcrypt cost factor. OWASP 2024 guidance recommends `>= 12`
+ * (audit finding M6).
  */
 const BCRYPT_ROUNDS = Number.parseInt(process.env.SEED_BCRYPT_ROUNDS ?? '12', 10);
 
 interface HumanSeed {
-  readonly email: string;
+  readonly localPart: string;
   readonly name: string;
 }
 
 interface AISeed {
   readonly id: string;
-  readonly email: string;
   readonly name: string;
-  readonly aiRole: 'Ada' | 'Hopper';
+  /** Optional role key; only the seeded defaults map to a system prompt. */
+  readonly aiRole: string | null;
+  /** Additional @-mention aliases written to `aiSettings.mentionAliases`. */
+  readonly mentionAliases: readonly string[];
 }
 
 interface ChannelSeed {
@@ -80,20 +135,87 @@ interface ChannelSeed {
 }
 
 const HUMAN_USERS: readonly HumanSeed[] = [
-  { email: 'mia@helio.local', name: 'Mia' },
-  { email: 'dev@helio.local', name: 'Dev' },
-  { email: 'pm@helio.local', name: 'PM' },
-] as const;
-
-const AI_USERS: readonly AISeed[] = [
-  { id: 'user_ai_ada', email: 'ada@helio.local', name: 'Ada', aiRole: 'Ada' },
-  { id: 'user_ai_hopper', email: 'hopper@helio.local', name: 'Hopper', aiRole: 'Hopper' },
+  { localPart: 'mia', name: 'Mia' },
+  { localPart: 'dev', name: 'Dev' },
+  { localPart: 'pm', name: 'PM' },
 ] as const;
 
 const CHANNELS: readonly ChannelSeed[] = [
   { id: 'chan_general', name: 'general' },
   { id: 'chan_engineering', name: 'engineering' },
 ] as const;
+
+/** Build a full email address from a local part and the configured domain. */
+function emailFor(localPart: string): string {
+  return `${localPart}@${EMAIL_DOMAIN}`;
+}
+
+/**
+ * Parse and validate `AI_AGENT_NAMES_JSON` (or the dev default).
+ *
+ * Validation lives here (not in `lib/env.ts`) so a malformed value
+ * only fails `prisma:seed`, never a running server process. Each entry
+ * must carry a non-empty `name`; `id`, `aiRole`, and `mentionAliases`
+ * are optional. A stable `id` is derived from the lowercased name when
+ * not supplied so re-runs stay idempotent.
+ */
+function resolveAIAgents(): AISeed[] {
+  const raw = process.env.AI_AGENT_NAMES_JSON?.trim();
+  if (!raw || raw.length === 0) {
+    if (IS_PRODUCTION) {
+      throw new Error(
+        'AI_AGENT_NAMES_JSON must be set when NODE_ENV=production. Refusing to seed the demo Ada/Hopper agents.',
+      );
+    }
+    return parseAgents(DEV_AGENTS_JSON);
+  }
+  return parseAgents(raw);
+}
+
+function parseAgents(json: string): AISeed[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch (err) {
+    throw new Error(
+      `AI_AGENT_NAMES_JSON is not valid JSON: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    throw new Error('AI_AGENT_NAMES_JSON must be a non-empty JSON array.');
+  }
+
+  return parsed.map((entry, index): AISeed => {
+    if (typeof entry !== 'object' || entry === null) {
+      throw new Error(`AI_AGENT_NAMES_JSON[${index}] must be an object.`);
+    }
+    const record = entry as Record<string, unknown>;
+    const name = typeof record.name === 'string' ? record.name.trim() : '';
+    if (name.length === 0) {
+      throw new Error(
+        `AI_AGENT_NAMES_JSON[${index}].name must be a non-empty string.`,
+      );
+    }
+    const id =
+      typeof record.id === 'string' && record.id.trim().length > 0
+        ? record.id.trim()
+        : `user_ai_${name.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
+    const aiRole =
+      typeof record.aiRole === 'string' && record.aiRole.trim().length > 0
+        ? record.aiRole.trim()
+        : null;
+    const mentionAliases = Array.isArray(record.mentionAliases)
+      ? record.mentionAliases.filter(
+          (a): a is string => typeof a === 'string' && a.trim().length > 0,
+        )
+      : [];
+    return { id, name, aiRole, mentionAliases };
+  });
+}
+
+const AI_USERS: readonly AISeed[] = resolveAIAgents();
 
 /** Upsert the single workspace required by the MVP. */
 async function seedWorkspace(): Promise<void> {
@@ -114,8 +236,9 @@ async function seedWorkspace(): Promise<void> {
  */
 async function seedHumans(passwordHash: string): Promise<void> {
   for (const human of HUMAN_USERS) {
+    const email = emailFor(human.localPart);
     const data: Prisma.UserUncheckedCreateInput = {
-      email: human.email,
+      email,
       name: human.name,
       passwordHash,
       isAI: false,
@@ -123,7 +246,7 @@ async function seedHumans(passwordHash: string): Promise<void> {
       workspaceId: WORKSPACE_ID,
     };
     await prisma.user.upsert({
-      where: { email: human.email },
+      where: { email },
       update: {
         name: data.name,
         passwordHash: data.passwordHash,
@@ -133,37 +256,55 @@ async function seedHumans(passwordHash: string): Promise<void> {
       },
       create: data,
     });
-    console.log(`✓ Human user ${human.email}`);
+    console.log(`✓ Human user ${email}`);
   }
 }
 
 /**
  * Upsert the AI colleagues. AI users have `passwordHash = null` so the
  * Credentials provider can never authenticate as them.
+ *
+ * `mentionAliases` from the agent config is written to
+ * `aiSettings.mentionAliases`; the runtime (`MessageService`) reads it
+ * to resolve `@`-mentions, replacing the brand-specific table that used
+ * to live in `lib/services/message.service.ts` (Phase 1 Req 16.2).
  */
 async function seedAIs(): Promise<void> {
   for (const ai of AI_USERS) {
+    const email = emailFor(ai.name.toLowerCase());
+    const aiSettings: Prisma.InputJsonValue = {
+      systemPrompt: '',
+      toolSet: [],
+      mentionAliases: [...ai.mentionAliases],
+      avatarUrl: null,
+    };
     const data: Prisma.UserUncheckedCreateInput = {
       id: ai.id,
-      email: ai.email,
+      email,
       name: ai.name,
       passwordHash: null,
       isAI: true,
       aiRole: ai.aiRole,
+      aiStatus: 'active',
+      aiSettings,
       workspaceId: WORKSPACE_ID,
     };
     await prisma.user.upsert({
-      where: { email: ai.email },
+      where: { email },
       update: {
         name: data.name,
         passwordHash: data.passwordHash,
         isAI: data.isAI,
         aiRole: data.aiRole,
+        aiStatus: data.aiStatus,
+        aiSettings,
         workspaceId: data.workspaceId,
       },
       create: data,
     });
-    console.log(`✓ AI colleague ${ai.name} (aiRole=${ai.aiRole})`);
+    console.log(
+      `✓ AI colleague ${ai.name}${ai.aiRole ? ` (aiRole=${ai.aiRole})` : ''}`,
+    );
   }
 }
 

@@ -243,6 +243,36 @@ const envSchema = z.object({
     .preprocess(emptyStringToUndefined, z.string().min(1).optional())
     .default('ws_default'),
 
+  /**
+   * Brand decoupling (Phase 1 Req 16). These configure the seeded
+   * workspace identity so no brand string is hard-coded in the data
+   * layer. They are consumed by `prisma/seed.ts`.
+   *
+   * - `WORKSPACE_NAME`     — display name of the single workspace.
+   * - `AI_AGENT_NAMES_JSON`— JSON array describing the seeded AI
+   *   colleagues. Parsed + validated inside the seed script (not
+   *   here) so a malformed value only fails `prisma:seed`, never a
+   *   running server process.
+   * - `SEED_EMAIL_DOMAIN`  — email domain for seeded users.
+   *
+   * Defaults are left empty here; `prisma/seed.ts` supplies the
+   * legacy `Helio` / `Ada` / `Hopper` / `helio.local` values ONLY in
+   * development so local dev + e2e keep working unchanged, while
+   * production refuses to seed without explicit configuration
+   * (mirrors the SEED_HUMAN_PASSWORD discipline from audit M5).
+   */
+  WORKSPACE_NAME: z
+    .preprocess(emptyStringToUndefined, z.string().min(1).optional())
+    .default(''),
+
+  AI_AGENT_NAMES_JSON: z
+    .preprocess(emptyStringToUndefined, z.string().min(1).optional())
+    .default(''),
+
+  SEED_EMAIL_DOMAIN: z
+    .preprocess(emptyStringToUndefined, z.string().min(1).optional())
+    .default(''),
+
   NODE_ENV: z
     .enum(['development', 'production', 'test'])
     .default('development'),
