@@ -48,6 +48,11 @@ vi.mock('@/lib/prisma', () => ({
         id: args.where.id,
       })),
     },
+    // Phase 1 Req 17: membership check before insert. Treat the sender
+    // as a member so the broadcast-contract tests stay focused.
+    channelMember: {
+      findUnique: vi.fn(async () => ({ channelId: 'chan_general' })),
+    },
     message: {
       create: vi.fn(
         async (args: {

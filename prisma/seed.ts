@@ -327,6 +327,38 @@ async function seedChannels(): Promise<void> {
   }
 }
 
+/**
+ * Seed channel memberships (Phase 1 Req 17). Every seeded user — human
+ * and AI — joins every seeded channel, reproducing the pre-membership
+ * "everyone in every channel" behaviour so a fresh seed works without
+ * the operator manually adding members. Idempotent via composite-key
+ * upsert.
+ */
+async function seedChannelMembers(): Promise<void> {
+  const users = await prisma.user.findMany({
+    where: { workspaceId: WORKSPACE_ID },
+    select: { id: true, isAI: true },
+  });
+  let count = 0;
+  for (const channel of CHANNELS) {
+    for (const user of users) {
+      await prisma.channelMember.upsert({
+        where: {
+          channelId_userId: { channelId: channel.id, userId: user.id },
+        },
+        update: { role: user.isAI ? 'ai' : 'human' },
+        create: {
+          channelId: channel.id,
+          userId: user.id,
+          role: user.isAI ? 'ai' : 'human',
+        },
+      });
+      count++;
+    }
+  }
+  console.log(`✓ Channel memberships (${count})`);
+}
+
 async function main(): Promise<void> {
   console.log(`Seeding workspace "${WORKSPACE_NAME}" (id=${WORKSPACE_ID})…`);
   const seedPassword: string = resolveSeedPassword();
@@ -336,6 +368,7 @@ async function main(): Promise<void> {
   await seedHumans(passwordHash);
   await seedAIs();
   await seedChannels();
+  await seedChannelMembers();
 
   console.log('Seed complete.');
 }
