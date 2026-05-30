@@ -17,6 +17,10 @@ import '../../setup';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { agenticEmitter } from '@/lib/loop/emitter';
+import {
+  startHumanChain,
+  __resetWakeChainsForTests,
+} from '@/lib/loop/wake-chain';
 
 const hoisted = vi.hoisted(() => ({
   runCycleCalls: [] as string[],
@@ -53,6 +57,7 @@ import { AgenticLoop } from '@/lib/loop/agentic-loop';
 beforeEach(() => {
   hoisted.runCycleCalls.splice(0);
   hoisted.runCycleMock.mockClear();
+  __resetWakeChainsForTests();
   AgenticLoop.start({} as never);
 });
 
@@ -63,13 +68,13 @@ afterEach(() => {
 
 describe('Feature: ai-native-team-workspace, Property 29: tick 异常隔离', () => {
   it('one AI throwing does not stop subsequent invocations for others', async () => {
-    agenticEmitter.emit('wakeup', 'user_ai_throws');
+    agenticEmitter.emit('wakeup', 'user_ai_throws', startHumanChain('user_human'));
     for (let i = 0; i < 3; i++) {
       await new Promise((r) => setImmediate(r));
     }
     // The runtime threw, but the loop swallowed it — emitting a
     // wakeup for a different AI right after must still work.
-    agenticEmitter.emit('wakeup', 'user_ai_ada');
+    agenticEmitter.emit('wakeup', 'user_ai_ada', startHumanChain('user_human'));
     for (let i = 0; i < 3; i++) {
       await new Promise((r) => setImmediate(r));
     }

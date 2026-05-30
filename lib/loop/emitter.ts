@@ -37,16 +37,21 @@
  * ```ts
  * // In ApprovalService.approve(id):
  * import { agenticEmitter } from '@/lib/loop/emitter';
+ * import { startHumanChain } from '@/lib/loop/wake-chain';
  * await prisma.approval.update({ ... });
- * agenticEmitter.emit('wakeup', approval.aiUserId);
+ * agenticEmitter.emit('wakeup', approval.aiUserId, startHumanChain(decidedById));
  *
  * // In AgenticLoop.start():
  * import { agenticEmitter } from '@/lib/loop/emitter';
- * agenticEmitter.on('wakeup', (aiUserId) => void runForAI(aiUserId));
+ * agenticEmitter.on('wakeup', (aiUserId, ctx) => {
+ *   if (authorizeWake(ctx.fromAiUserId, aiUserId, ctx).ok) void runForAI(aiUserId);
+ * });
  * ```
  */
 
 import { EventEmitter } from 'node:events';
+
+import type { WakeContext } from '@/lib/loop/wake-chain';
 
 /**
  * Strongly-typed map of every event the Agentic Loop cares about.
@@ -64,13 +69,23 @@ export type AgenticEvents = {
   /**
    * Wake up the Agentic Loop for a specific AI colleague.
    *
-   * Emitted after an `Approval` row has been persisted as `APPROVED`.
-   * Listeners should invoke a new decision cycle for the given AI
-   * without waiting for the next periodic tick.
+   * Emitted after a HUMAN action that should make an AI act: a channel
+   * @mention (`MessageService.create`, human senders only) or an
+   * approval transitioning `PENDING → APPROVED`
+   * (`ApprovalService.approve`). The accompanying {@link WakeContext}
+   * traces the wake back to that originating human action so the
+   * Agentic Loop's single `authorizeWake()` chokepoint can bound the
+   * resulting wake chain (direction D, Req 22). AI-initiated wakes
+   * (the `assign_task` hand-off, D2-b) carry a child context derived
+   * via `deriveChildContext`.
    *
-   * Tuple shape: `[aiUserId]` — `User.id` of the AI colleague to wake.
+   * Listeners should run `authorizeWake` first and, only if permitted,
+   * invoke a new decision cycle for the given AI.
+   *
+   * Tuple shape: `[aiUserId, ctx]` — `User.id` of the AI to wake plus
+   * the wake's {@link WakeContext}.
    */
-  wakeup: [aiUserId: string];
+  wakeup: [aiUserId: string, ctx: WakeContext];
 
   /**
    * Cancel the in-flight decision cycle for a specific AI colleague.
