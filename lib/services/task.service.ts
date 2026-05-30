@@ -440,6 +440,102 @@ export async function summarizeForAI(
   return { counts, total: tasks.length, recentlyUpdated };
 }
 
+// ---------------------------------------------------------------------------
+// AI task hand-off (direction D, Req 21 — assign_task)
+// ---------------------------------------------------------------------------
+
+/**
+ * Outcome of resolving an `assign_task` target (direction D, Req 21.4).
+ * Distinguishes "no such AI" from "exists but you don't share a channel"
+ * so the tool can give the model a precise, actionable error.
+ */
+export type HandoffTargetResolution =
+  | { readonly ok: true; readonly id: string; readonly name: string }
+  | { readonly ok: false; readonly reason: 'not_found' | 'not_shared_channel' };
+
+/**
+ * Resolve and validate an `assign_task` hand-off target (Req 21.4).
+ *
+ * The assignee must be (a) an AI in the active workspace resolvable by
+ * id or name (reuses {@link resolveTeammate}), and (b) a member of at
+ * least one channel the caller is also a member of — an AI can only
+ * delegate to a teammate it actually shares a channel with. Returns a
+ * discriminated result so the dispatcher can map each failure to a
+ * distinct `is_error` message; never throws on a missing target.
+ *
+ * Read-only: resolution + a membership existence check. The actual
+ * assignment write is {@link assign}.
+ *
+ * @param selector `callerId` (the assigning AI) plus at least one of
+ *   `assigneeId` / `assigneeName` (the tool's Zod schema enforces "at
+ *   least one present").
+ */
+export async function resolveHandoffTarget(selector: {
+  callerId: string;
+  assigneeId?: string;
+  assigneeName?: string;
+}): Promise<HandoffTargetResolution> {
+  const target = await resolveTeammate({
+    aiUserId: selector.assigneeId,
+    aiName: selector.assigneeName,
+  });
+  if (!target) return { ok: false, reason: 'not_found' };
+
+  // Must share at least one channel with the caller (Req 21.4). A
+  // single existence check: is there a ChannelMember row for the target
+  // whose channel also has the caller as a member?
+  const shared = await prisma.channelMember.findFirst({
+    where: {
+      userId: target.id,
+      channel: { members: { some: { userId: selector.callerId } } },
+    },
+    select: { channelId: true },
+  });
+  if (!shared) return { ok: false, reason: 'not_shared_channel' };
+
+  return { ok: true, id: target.id, name: target.name };
+}
+
+/**
+ * Reassign a task to a teammate AI (direction D, Req 21.2).
+ *
+ * Workspace-scoped (audit H4): the task is located by its human-readable
+ * `PROJ-{N}` `taskId` within the active workspace, then its `assigneeId`
+ * is updated. `isAITask` is set to `true` because hand-off targets are
+ * always AI teammates (validated by {@link resolveHandoffTarget}), so
+ * the board reflects AI ownership. Broadcasts `task:updated` only after
+ * the write commits, exactly like {@link updateStatus}.
+ *
+ * Does NOT wake the assignee — that is the caller's responsibility,
+ * routed through the wake-chain chokepoint so it is loop-bounded.
+ *
+ * @param taskId The human-readable `PROJ-{N}` identifier.
+ * @param assigneeId `User.id` of the teammate AI (already resolved).
+ * @returns The updated {@link Task}.
+ * @throws {ValidationError} when the task does not exist in the workspace.
+ */
+export async function assign(taskId: string, assigneeId: string): Promise<Task> {
+  const workspaceId = resolveWorkspaceId();
+
+  const existing = await prisma.task.findFirst({
+    where: { taskId, workspaceId },
+    select: { id: true },
+  });
+  if (!existing) {
+    throw new ValidationError(
+      `Task ${taskId} does not exist in this workspace.`,
+    );
+  }
+
+  const task = await prisma.task.update({
+    where: { id: existing.id },
+    data: { assigneeId, isAITask: true },
+  });
+
+  broadcastTaskUpdated(task);
+  return task;
+}
+
 /**
  * Aggregated namespace export so callers can use either named imports
  * or the `TaskService.method(...)` style favored across the spec.
@@ -450,4 +546,6 @@ export const TaskService = {
   list,
   resolveTeammate,
   summarizeForAI,
+  resolveHandoffTarget,
+  assign,
 } as const;

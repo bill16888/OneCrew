@@ -243,6 +243,47 @@ export function authorizeWake(
 }
 
 /**
+ * Read-only prediction of {@link authorizeWake}'s verdict WITHOUT
+ * recording anything (direction D, Req 21.3).
+ *
+ * The `assign_task` hand-off tool (D2-b) needs to tell the model — in
+ * the tool_result, synchronously — whether its hand-off will wake the
+ * teammate or be suppressed (and why). The actual recording stays a
+ * single event at the Agentic Loop's wakeup listener (the chokepoint).
+ * Because `agenticEmitter.emit` invokes that listener synchronously and
+ * no other wake can interleave in between, this peek and the listener's
+ * subsequent {@link authorizeWake} observe identical state and so return
+ * the identical verdict — peek just doesn't mutate the counters.
+ *
+ * Mirrors authorizeWake's decision order (hop, chain-activation, pair)
+ * but performs NO eviction and NO recording.
+ *
+ * @param fromAiUserId The AI issuing the wake, or `null` for human.
+ * @param toAiUserId The AI being woken.
+ * @param ctx The wake's {@link WakeContext}.
+ */
+export function peekWake(
+  fromAiUserId: string | null,
+  toAiUserId: string,
+  ctx: WakeContext,
+): WakeVerdict {
+  if (ctx.hop > env.AI_WAKE_MAX_HOPS) {
+    return { ok: false, reason: 'hop_budget' };
+  }
+  const state = chains.get(ctx.chainId);
+  if ((state?.activations ?? 0) >= env.AI_WAKE_MAX_CHAIN_ACTIVATIONS) {
+    return { ok: false, reason: 'chain_activation' };
+  }
+  if (fromAiUserId !== null) {
+    const count = state?.pairCounts.get(pairKeyOf(fromAiUserId, toAiUserId)) ?? 0;
+    if (count >= env.AI_WAKE_MAX_PAIR_REPEATS) {
+      return { ok: false, reason: 'pair_repeat' };
+    }
+  }
+  return { ok: true };
+}
+
+/**
  * Test-only: current number of tracked chains. Lets the idle-eviction
  * test observe that a quiet chain was actually dropped. Do not call
  * from app code.

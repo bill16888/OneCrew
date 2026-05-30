@@ -263,6 +263,21 @@ const envSchema = z.object({
     .default(12),
 
   /**
+   * Master switch for AI-to-AI task hand-off (direction D, Req 21,
+   * phase D2-b). When false (the default) the `assign_task` tool
+   * resolves to an `is_error` and emits no wake, so the wake-chain
+   * infrastructure (D2-a) can soak in production with the autonomy
+   * dormant. Flip to true to let one AI delegate a task to a teammate
+   * (bounded by the AI_WAKE_* budgets above).
+   */
+  AI_HANDOFF_ENABLED: z
+    .preprocess(
+      (v) => (typeof v === 'string' ? v.toLowerCase() === 'true' : v),
+      z.boolean(),
+    )
+    .default(false),
+
+  /**
    * AI daily report (Phase 1 Req 15). When `DAILY_REPORTS_ENABLED` is
    * true the custom server schedules a `node-cron` job at
    * `DAILY_REPORT_CRON` (in `WORKSPACE_TZ`) that asks each active AI to

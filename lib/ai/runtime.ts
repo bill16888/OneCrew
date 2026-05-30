@@ -49,6 +49,7 @@ import * as Sentry from '@sentry/nextjs';
 
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
+import type { WakeContext } from '@/lib/loop/wake-chain';
 import prisma from '@/lib/prisma';
 import { EVENTS } from '@/lib/realtime/events';
 import { getIO } from '@/lib/realtime/io';
@@ -501,6 +502,15 @@ export interface RunCycleOptions {
    * omitted the cycle behaves exactly as the periodic/wakeup path.
    */
   readonly extraInstruction?: string;
+  /**
+   * The wake-chain context of the wake that started this cycle
+   * (direction D, Req 22). Threaded into the tool dispatch context so
+   * the `assign_task` hand-off tool can derive a child context for the
+   * teammate it wakes, keeping the hand-off within the chain's loop
+   * budgets. Absent for non-human-rooted cycles (the periodic
+   * auto-tick), in which case `assign_task` assigns without waking.
+   */
+  readonly wakeContext?: WakeContext;
 }
 
 export async function runCycle(
@@ -619,7 +629,10 @@ export async function runCycle(
       const toolResults: ToolResultBlockParam[] = await Promise.all(
         toolUses.map((u) => {
           const call: ToolCall = { id: u.id, name: u.name, input: u.input };
-          return dispatchTool({ aiUserId, allowedTools }, call);
+          return dispatchTool(
+            { aiUserId, allowedTools, wakeContext: options.wakeContext },
+            call,
+          );
         }),
       );
 

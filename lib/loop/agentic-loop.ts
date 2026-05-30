@@ -189,7 +189,7 @@ function logLoopError(
  * });
  * ```
  */
-async function runForAI(aiUserId: string): Promise<void> {
+async function runForAI(aiUserId: string, ctx?: WakeContext): Promise<void> {
   // 1. De-dupe across periodic ticks and wakeup events.
   if (inFlight.has(aiUserId)) {
     return;
@@ -226,7 +226,11 @@ async function runForAI(aiUserId: string): Promise<void> {
   //    holds across every async boundary inside `runCycle`.
   inFlight.add(aiUserId);
   try {
-    await AIRuntime.runCycle(aiUserId);
+    // Thread the wake-chain context (direction D, Req 22) into the
+    // cycle so the assign_task hand-off tool can derive a child context
+    // for any teammate it wakes. The periodic tick passes no ctx, so an
+    // auto-tick cycle cannot start a hand-off chain.
+    await AIRuntime.runCycle(aiUserId, ctx ? { wakeContext: ctx } : {});
   } catch (err) {
     // `runCycle` already converts in-cycle failures to a structured
     // RunCycleResult (`finishReason: 'retry_exhausted'`). The only
@@ -402,8 +406,9 @@ function start(io: AppIOServer): void {
     );
     // Fire-and-forget: `runForAI` never throws, so we don't need to
     // attach an extra `.catch`. The leading `void` makes the discard
-    // explicit for both readers and lint rules.
-    void runForAI(aiUserId);
+    // explicit for both readers and lint rules. The wake context is
+    // threaded through so an AI hand-off (D2-b) can derive its child.
+    void runForAI(aiUserId, ctx);
   };
   agenticEmitter.on('wakeup', wakeupListener);
   logger.info(

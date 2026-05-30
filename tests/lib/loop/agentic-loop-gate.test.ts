@@ -89,7 +89,12 @@ describe('Feature: ai-native-team-workspace, Property 19: 审批门控与即时�
     for (let i = 0; i < 3; i++) {
       await new Promise((r) => setImmediate(r));
     }
-    expect(hoisted.runCycleMock).toHaveBeenCalledWith('user_ai_ada');
+    expect(hoisted.runCycleMock).toHaveBeenCalledWith(
+      'user_ai_ada',
+      expect.objectContaining({
+        wakeContext: expect.objectContaining({ hop: 0, fromAiUserId: null }),
+      }),
+    );
   });
 
   it('reject events do not trigger a new cycle (no wakeup)', async () => {

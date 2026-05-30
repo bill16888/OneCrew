@@ -1,5 +1,5 @@
 /**
- * @file AI tool surface (9 tools) + Zod input validation + dispatcher.
+ * @file AI tool surface (10 tools) + Zod input validation + dispatcher.
  *
  * The AI runtime (`lib/ai/runtime.ts`) hands every `tool_use` block returned
  * by Anthropic to {@link dispatchTool}. The dispatcher is the *only* path
@@ -12,7 +12,7 @@
  *    model as a `tool_result` with `is_error: true` so the next round can
  *    self-correct.
  *
- * 2. **Closed tool set**: The exposed surface is exactly the 9 tools
+ * 2. **Closed tool set**: The exposed surface is exactly the 10 tools
  *    declared in {@link TOOL_DEFINITIONS}. Any tool name outside
  *    {@link TOOL_NAMES} resolves with `is_error: true` and a
  *    `Unknown tool: ...` message (Requirement 5.3, Property 12).
@@ -45,7 +45,7 @@
  *   - `mock_web_search` and `mock_read_project_docs` return
  *     deterministic preset payloads from {@link ./mocks}.
  *
- * Validates: Requirements 5.1 (closed 9-tool surface), 5.2 (schema
+ * Validates: Requirements 5.1 (closed 10-tool surface), 5.2 (schema
  *            validation), 5.3 (unknown-tool rejection),
  *            10.3 (failed schema check yields `is_error` `tool_result`,
  *            no exception).
@@ -55,6 +55,12 @@ import { z } from 'zod';
 
 import { BUDGET_EXCEEDED_CODE, budget } from '@/lib/ai/budget';
 import { env } from '@/lib/env';
+import { agenticEmitter } from '@/lib/loop/emitter';
+import {
+  deriveChildContext,
+  peekWake,
+  type WakeContext,
+} from '@/lib/loop/wake-chain';
 import { ApprovalService } from '@/lib/services/approval.service';
 import { MessageService } from '@/lib/services/message.service';
 import { TaskService, type TeammateTaskSummary } from '@/lib/services/task.service';
@@ -109,7 +115,7 @@ interface ApprovalAnalysisInput {
 }
 
 /**
- * The closed set of 9 tools exposed to the model on every `runCycle`.
+ * The closed set of 10 tools exposed to the model on every `runCycle`.
  *
  * Marked `as const` so:
  *  - The `name` literals propagate into {@link ToolName}, giving the rest
@@ -261,6 +267,20 @@ export const TOOL_DEFINITIONS = [
       },
     },
   },
+  {
+    name: 'assign_task',
+    description:
+      "Hand a task off to a teammate AI: set them as the assignee and wake them to pick it up. Identify the task by its PROJ-{N} taskId and the teammate by assigneeId or assigneeName (provide at least one). You may only assign to an AI that shares a channel with you. You may issue several assign_task calls to fan work out to multiple teammates, and you may hand a task back to the AI that delegated to you. When you are wrapping up, summarise to the human with send_channel_message or request_approval instead of handing off. Requires the operator to have enabled AI hand-off.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        taskId: { type: 'string' },
+        assigneeId: { type: 'string' },
+        assigneeName: { type: 'string' },
+      },
+      required: ['taskId'],
+    },
+  },
 ] as const;
 
 /**
@@ -356,6 +376,16 @@ export const TOOL_ZOD_SCHEMAS: Record<ToolName, z.ZodTypeAny> = {
     .refine((value) => Boolean(value.aiUserId ?? value.aiName), {
       message: 'Provide aiUserId or aiName to identify the teammate.',
     }),
+
+  assign_task: z
+    .object({
+      taskId: z.string().min(1).max(100),
+      assigneeId: z.string().min(1).optional(),
+      assigneeName: z.string().min(1).max(200).optional(),
+    })
+    .refine((value) => Boolean(value.assigneeId ?? value.assigneeName), {
+      message: 'Provide assigneeId or assigneeName to identify the teammate.',
+    }),
 };
 
 // ---------------------------------------------------------------------------
@@ -367,7 +397,7 @@ export const TOOL_ZOD_SCHEMAS: Record<ToolName, z.ZodTypeAny> = {
  * caller AI's `User.id` so side-effect branches can attribute writes
  * (e.g. `Message.userId`, `Approval.aiUserId`) to the correct AI, and
  * an optional per-AI tool whitelist so operators can constrain custom
- * AIs to a subset of the 9-tool surface without changing the schema
+ * AIs to a subset of the 10-tool surface without changing the schema
  * list shipped to the model.
  */
 export interface ToolDispatchContext {
@@ -386,6 +416,18 @@ export interface ToolDispatchContext {
    * was persisted but never enforced (audit finding C4).
    */
   readonly allowedTools?: readonly string[];
+  /**
+   * The wake-chain context of the cycle this tool is running in
+   * (direction D, Req 22). Present when the cycle was started by a
+   * human-rooted wake (mention / approval) or an AI hand-off; absent
+   * for non-human-rooted cycles (e.g. the periodic auto-tick). The
+   * `assign_task` tool uses it to derive the child context for the
+   * teammate it wakes, so the hand-off stays within the same chain's
+   * budgets. When absent, `assign_task` performs the assignment but
+   * emits no wake, preserving the "every chain roots at a human"
+   * invariant.
+   */
+  readonly wakeContext?: WakeContext;
 }
 
 /**
@@ -878,6 +920,81 @@ export async function dispatchTool(
         return buildToolResult(
           call.id,
           renderTeammateSummary(target.name, summary),
+        );
+      }
+
+      case 'assign_task': {
+        // Direction D, Req 21 — hand a task off to a teammate AI and
+        // wake them. This is the ONLY wake-bearing tool. Gated behind
+        // AI_HANDOFF_ENABLED so the wake-chain infra (D2-a) can soak
+        // with autonomy dormant. Resolution + channel-sharing live in
+        // TaskService (workspace-scoped reads); the wake itself is
+        // emitted through the Agentic Loop's single authorizeWake
+        // chokepoint, so fan-out, hand-back, and depth are all bounded.
+        if (!env.AI_HANDOFF_ENABLED) {
+          return buildToolResult(
+            call.id,
+            'AI hand-off is disabled. Ask the operator to set AI_HANDOFF_ENABLED=true to use assign_task.',
+            true,
+          );
+        }
+        const { taskId, assigneeId, assigneeName } = input as {
+          taskId: string;
+          assigneeId?: string;
+          assigneeName?: string;
+        };
+        const resolution = await TaskService.resolveHandoffTarget({
+          callerId: ctx.aiUserId,
+          assigneeId,
+          assigneeName,
+        });
+        if (!resolution.ok) {
+          const who = assigneeName
+            ? `name "${assigneeName}"`
+            : `id "${assigneeId ?? ''}"`;
+          const message =
+            resolution.reason === 'not_found'
+              ? `No teammate AI found for ${who} in this workspace.`
+              : `That teammate does not share a channel with you, so you cannot hand this task off to them.`;
+          return buildToolResult(call.id, message, true);
+        }
+        if (resolution.id === ctx.aiUserId) {
+          return buildToolResult(
+            call.id,
+            'You cannot hand a task off to yourself.',
+            true,
+          );
+        }
+
+        // Perform the reassignment (workspace-scoped; a missing task
+        // throws and is normalised to is_error by the outer try/catch).
+        await TaskService.assign(taskId, resolution.id);
+
+        // Wake the assignee — but only within a human-rooted chain.
+        const parent = ctx.wakeContext;
+        if (!parent) {
+          return buildToolResult(
+            call.id,
+            `Assigned ${taskId} to ${resolution.name}. No wake sent: this cycle is not part of a human-initiated chain.`,
+          );
+        }
+        const child = deriveChildContext(parent, ctx.aiUserId);
+        // Predict the chokepoint's verdict (read-only) so the model
+        // learns synchronously whether the teammate was woken; the
+        // single authoritative authorizeWake + record happens at the
+        // Agentic Loop's wakeup listener. They observe identical state
+        // (emit invokes the listener synchronously) so they agree.
+        const verdict = peekWake(ctx.aiUserId, resolution.id, child);
+        if (!verdict.ok) {
+          return buildToolResult(
+            call.id,
+            `Assigned ${taskId} to ${resolution.name}, but did not wake them: loop guard (${verdict.reason}). Do not retry this hand-off; they will pick it up when next active.`,
+          );
+        }
+        agenticEmitter.emit('wakeup', resolution.id, child);
+        return buildToolResult(
+          call.id,
+          `Assigned ${taskId} to ${resolution.name} and woke them (hop ${child.hop}).`,
         );
       }
 
