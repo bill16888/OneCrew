@@ -228,6 +228,41 @@ const envSchema = z.object({
     .default(30_000),
 
   /**
+   * Wake-chain loop prevention (direction D, Req 22). These bound the
+   * AI-to-AI wake tree that the `assign_task` hand-off tool (D2-b)
+   * introduces, so turning on AI autonomy cannot spiral into a
+   * budget-burning `A → B → A → B …` loop. All three are enforced by
+   * the single `authorizeWake()` chokepoint in `lib/loop/wake-chain.ts`.
+   * The daily USD budget (`AI_DAILY_BUDGET_USD`) remains the
+   * independent absolute backstop — these are orthogonal guards.
+   *
+   * - `AI_WAKE_MAX_HOPS` (6) — max relay DEPTH per chain
+   *   (`human → A → B → …`).
+   * - `AI_WAKE_MAX_PAIR_REPEATS` (3) — max times one ordered
+   *   `(fromAI → toAI)` edge may fire PER CHAIN; permits a finite
+   *   hand-back while killing unbounded ping-pong.
+   * - `AI_WAKE_MAX_CHAIN_ACTIVATIONS` (12) — max TOTAL authorized wakes
+   *   across the whole fan-out × depth tree; the real fan-out guard.
+   */
+  AI_WAKE_MAX_HOPS: z.coerce
+    .number()
+    .int('AI_WAKE_MAX_HOPS must be an integer')
+    .positive('AI_WAKE_MAX_HOPS must be > 0')
+    .default(6),
+
+  AI_WAKE_MAX_PAIR_REPEATS: z.coerce
+    .number()
+    .int('AI_WAKE_MAX_PAIR_REPEATS must be an integer')
+    .positive('AI_WAKE_MAX_PAIR_REPEATS must be > 0')
+    .default(3),
+
+  AI_WAKE_MAX_CHAIN_ACTIVATIONS: z.coerce
+    .number()
+    .int('AI_WAKE_MAX_CHAIN_ACTIVATIONS must be an integer')
+    .positive('AI_WAKE_MAX_CHAIN_ACTIVATIONS must be > 0')
+    .default(12),
+
+  /**
    * AI daily report (Phase 1 Req 15). When `DAILY_REPORTS_ENABLED` is
    * true the custom server schedules a `node-cron` job at
    * `DAILY_REPORT_CRON` (in `WORKSPACE_TZ`) that asks each active AI to

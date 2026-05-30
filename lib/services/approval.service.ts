@@ -34,6 +34,7 @@
 import type { Approval, Prisma } from '@prisma/client';
 
 import { agenticEmitter } from '@/lib/loop/emitter';
+import { startHumanChain } from '@/lib/loop/wake-chain';
 import { notifyApprovalPending } from '@/lib/notifications/server';
 import prisma from '@/lib/prisma';
 import {
@@ -246,8 +247,11 @@ export async function approve(
   // Persistence committed — safe to wake up the Agentic Loop. Note that
   // we intentionally emit on `wakeup` (not `reject`) for APPROVED
   // transitions; design.md couples the two channels with opposite
-  // semantics.
-  agenticEmitter.emit('wakeup', approval.aiUserId);
+  // semantics. The wake starts a fresh chain rooted at the deciding
+  // human (direction D, Req 22): the approval is a human action, so the
+  // resulting cycle — and any hand-offs it spawns (D2-b) — are bounded
+  // by authorizeWake() against this origin.
+  agenticEmitter.emit('wakeup', approval.aiUserId, startHumanChain(decidedById));
   return approval;
 }
 

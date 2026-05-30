@@ -21,14 +21,19 @@
  *      ensures at most one cycle per AI runs at any moment, even when
  *      a wakeup event fires while a periodic tick has the same AI
  *      mid-cycle (Requirement 7.2).
- *   4. **Immediate wakeup** — subscribing to `agenticEmitter.on('wakeup',
- *      aiUserId)` lets the approval service resume the AI's cycle the
- *      instant a `PENDING → APPROVED` transition commits, instead of
- *      waiting up to 30 s for the next tick (Requirements 6.6, 7.2).
- *      Rejections are surfaced on a separate `'reject'` channel and
- *      only signal in-cycle cancellation; they intentionally do **not**
- *      start a new cycle here, so the Agentic Loop attaches no
- *      listener for `'reject'` during {@link start}.
+ *   4. **Immediate wakeup + loop prevention** — subscribing to
+ *      `agenticEmitter.on('wakeup', (aiUserId, ctx) => …)` lets a human
+ *      @mention or an approval grant resume an AI's cycle the instant
+ *      it commits, instead of waiting up to 30 s for the next tick
+ *      (Requirements 6.6, 7.2). Each wake carries a {@link WakeContext}
+ *      and is gated by the single `authorizeWake()` chokepoint
+ *      (direction D, Req 22): an over-budget wake is logged and dropped
+ *      WITHOUT starting a cycle, which is what makes AI-to-AI hand-off
+ *      (D2-b) safe from runaway loops. Rejections are surfaced on a
+ *      separate `'reject'` channel and only signal in-cycle
+ *      cancellation; they intentionally do **not** start a new cycle
+ *      here, so the Agentic Loop attaches no listener for `'reject'`
+ *      during {@link start}.
  *   5. **Fault isolation** — both the top-level {@link tick} and each
  *      per-AI {@link runForAI} are wrapped in `try/catch`; any thrown
  *      error is logged and swallowed so the next tick still fires on
@@ -58,6 +63,7 @@ import { BUDGET_EXCEEDED_CODE, budget } from '@/lib/ai/budget';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
 import { agenticEmitter } from '@/lib/loop/emitter';
+import { authorizeWake, type WakeContext } from '@/lib/loop/wake-chain';
 import prisma from '@/lib/prisma';
 import type { AppIOServer } from '@/lib/realtime/io';
 import { ApprovalService } from '@/lib/services/approval.service';
@@ -113,7 +119,8 @@ let timer: ReturnType<typeof setInterval> | null = null;
  * own `'reject'` cancellation logic landing in task 9.x — that share
  * the singleton.
  */
-let wakeupListener: ((aiUserId: string) => void) | null = null;
+let wakeupListener: ((aiUserId: string, ctx: WakeContext) => void) | null =
+  null;
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -176,8 +183,10 @@ function logLoopError(
  * // From the periodic tick:
  * await Promise.all(ais.map((ai) => runForAI(ai.id)));
  *
- * // From the wakeup listener:
- * agenticEmitter.on('wakeup', (aiUserId) => void runForAI(aiUserId));
+ * // From the wakeup listener (gated by authorizeWake):
+ * agenticEmitter.on('wakeup', (aiUserId, ctx) => {
+ *   if (authorizeWake(ctx.fromAiUserId, aiUserId, ctx).ok) void runForAI(aiUserId);
+ * });
  * ```
  */
 async function runForAI(aiUserId: string): Promise<void> {
@@ -355,13 +364,40 @@ function start(io: AppIOServer): void {
   // We capture the listener so `stop` can detach exactly this function
   // without affecting other subscribers of the process-global emitter
   // (notably the AI Runtime's `reject` listener wired in task 9.x).
-  wakeupListener = (aiUserId: string) => {
-    // Diagnostic: log every wakeup the loop receives so we can
-    // correlate with `mention_wakeup_emit` log lines on the producer
-    // side (`MessageService.create`) and confirm the singleton is
-    // actually shared.
+  wakeupListener = (aiUserId: string, ctx: WakeContext) => {
+    // SINGLE CHOKEPOINT for loop prevention (direction D, Req 22).
+    // Every wake — human @mention, approval grant, or AI hand-off
+    // (D2-b) — funnels through authorizeWake() here. A suppressed wake
+    // is logged and dropped WITHOUT starting a cycle; the budget /
+    // shape of the wake chain is bounded before any model tokens are
+    // spent. The daily USD budget (shouldPauseCycle, audit M1) is
+    // still checked independently inside runForAI below.
+    const verdict = authorizeWake(ctx.fromAiUserId, aiUserId, ctx);
+    if (!verdict.ok) {
+      logger.warn(
+        {
+          event: `wake_suppressed_${verdict.reason}`,
+          aiUserId,
+          chainId: ctx.chainId,
+          hop: ctx.hop,
+          fromAiUserId: ctx.fromAiUserId,
+        },
+        'Wake suppressed by loop guard',
+      );
+      return;
+    }
+
+    // Diagnostic: log every authorized wake so we can correlate with
+    // `mention_wakeup_emit` log lines on the producer side
+    // (`MessageService.create`) and confirm the singleton is actually
+    // shared.
     logger.info(
-      { event: 'agentic_wakeup_received', aiUserId },
+      {
+        event: 'agentic_wakeup_received',
+        aiUserId,
+        chainId: ctx.chainId,
+        hop: ctx.hop,
+      },
       'Agentic wakeup received',
     );
     // Fire-and-forget: `runForAI` never throws, so we don't need to

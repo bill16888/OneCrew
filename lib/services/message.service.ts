@@ -23,6 +23,7 @@ import type { Message, Prisma } from '@prisma/client';
 
 import { logger } from '@/lib/logger';
 import { agenticEmitter } from '@/lib/loop/emitter';
+import { startHumanChain } from '@/lib/loop/wake-chain';
 import prisma from '@/lib/prisma';
 import { rateLimit } from '@/lib/ratelimit';
 import { EVENTS, type MessageNewPayload } from '@/lib/realtime/events';
@@ -429,6 +430,14 @@ async function wakeMentionedAIs(
     select: { id: true, name: true, aiSettings: true },
   });
 
+  // One human message = one wake chain (direction D, Req 22). The same
+  // human-rooted context (hop 0, fromAiUserId null) is reused for every
+  // AI this message mentions, so a fan-out across several AIs counts
+  // against ONE chain's activation budget rather than spawning several
+  // independent chains. The Agentic Loop's authorizeWake() chokepoint
+  // bounds it from there.
+  const wakeContext = startHumanChain(senderId);
+
   for (const ai of aiUsers) {
     const matched = aiMatchesMentions(ai.name, ai.aiSettings, allowedMentions);
     if (matched) {
@@ -440,11 +449,12 @@ async function wakeMentionedAIs(
           event: 'mention_wakeup_emit',
           aiUserId: ai.id,
           aiName: ai.name,
+          chainId: wakeContext.chainId,
           listenerCount: agenticEmitter.listenerCount('wakeup'),
         },
         'Mention wakeup emitted',
       );
-      agenticEmitter.emit('wakeup', ai.id);
+      agenticEmitter.emit('wakeup', ai.id, wakeContext);
     }
   }
 }

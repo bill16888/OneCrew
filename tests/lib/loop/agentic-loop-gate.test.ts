@@ -19,6 +19,10 @@ import '../../setup';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { agenticEmitter } from '@/lib/loop/emitter';
+import {
+  startHumanChain,
+  __resetWakeChainsForTests,
+} from '@/lib/loop/wake-chain';
 
 const hoisted = vi.hoisted(() => ({
   runCycleMock: vi.fn(async (aiUserId: string) => ({
@@ -58,6 +62,7 @@ beforeEach(() => {
   hoisted.pendingByAi.clear();
   hoisted.aiUsers = [];
   hoisted.runCycleMock.mockClear();
+  __resetWakeChainsForTests();
   AgenticLoop.start({} as never);
 });
 
@@ -69,7 +74,7 @@ afterEach(() => {
 describe('Feature: ai-native-team-workspace, Property 19: 审批门控与即时唤醒', () => {
   it('skips wakeup-driven runForAI when the AI has a PENDING approval', async () => {
     hoisted.pendingByAi.set('user_ai_ada', 1);
-    agenticEmitter.emit('wakeup', 'user_ai_ada');
+    agenticEmitter.emit('wakeup', 'user_ai_ada', startHumanChain('user_human'));
     // Allow the microtask queue to drain — `runForAI` is fire-and-
     // forget but every step inside it is awaited.
     await new Promise((r) => setImmediate(r));
@@ -78,7 +83,7 @@ describe('Feature: ai-native-team-workspace, Property 19: 审批门控与即时�
 
   it('runs immediately on wakeup when no PENDING approval exists', async () => {
     hoisted.pendingByAi.set('user_ai_ada', 0);
-    agenticEmitter.emit('wakeup', 'user_ai_ada');
+    agenticEmitter.emit('wakeup', 'user_ai_ada', startHumanChain('user_human'));
     // The wakeup listener kicks `runForAI` synchronously, but the
     // listPendingForAI / runCycle awaits run on the microtask queue.
     for (let i = 0; i < 3; i++) {
@@ -90,6 +95,23 @@ describe('Feature: ai-native-team-workspace, Property 19: 审批门控与即时�
   it('reject events do not trigger a new cycle (no wakeup)', async () => {
     agenticEmitter.emit('reject', 'user_ai_ada');
     await new Promise((r) => setImmediate(r));
+    expect(hoisted.runCycleMock).not.toHaveBeenCalled();
+  });
+
+  it('suppresses a wake whose hop exceeds the budget (Req 22.2)', async () => {
+    hoisted.pendingByAi.set('user_ai_ada', 0);
+    // A hand-off context deeper than AI_WAKE_MAX_HOPS (default 6) must
+    // be dropped by the authorizeWake chokepoint BEFORE runForAI runs —
+    // no cycle, no model tokens.
+    agenticEmitter.emit('wakeup', 'user_ai_ada', {
+      chainId: 'chain_overdeep',
+      hop: 99,
+      originUserId: 'user_human',
+      fromAiUserId: 'user_ai_hopper',
+    });
+    for (let i = 0; i < 3; i++) {
+      await new Promise((r) => setImmediate(r));
+    }
     expect(hoisted.runCycleMock).not.toHaveBeenCalled();
   });
 });
