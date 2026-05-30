@@ -32,6 +32,12 @@ vi.mock('@/lib/services/task.service', () => ({
       status: 'InProgress',
     })),
     list: vi.fn(async () => []),
+    resolveTeammate: vi.fn(async () => ({ id: 'ai_other', name: 'Hopper' })),
+    summarizeForAI: vi.fn(async () => ({
+      counts: { Backlog: 0, InProgress: 0, InReview: 0, Done: 0 },
+      total: 0,
+      recentlyUpdated: [],
+    })),
   },
 }));
 
@@ -80,14 +86,17 @@ const EXPECTED_TOOL_SET: readonly string[] = [
   // 8 tools declared in TOOL_DEFINITIONS".
   'web_search',
   'read_project_docs',
+  // Direction D Req 20: read-only teammate status read. Property 12
+  // amended in .kiro/specs/ai-collaboration/requirements.md (8 -> 9).
+  'check_teammate_tasks',
 ];
 
 describe('Feature: ai-native-team-workspace, Property 12: 工具表面恒等', () => {
-  it('exposes exactly the 8 expected tools as a set', () => {
+  it('exposes exactly the 9 expected tools as a set', () => {
     const names = new Set(TOOL_DEFINITIONS.map((t) => t.name));
     expect(names).toEqual(new Set(EXPECTED_TOOL_SET));
-    expect(TOOL_DEFINITIONS).toHaveLength(8);
-    expect(TOOL_NAMES).toHaveLength(8);
+    expect(TOOL_DEFINITIONS).toHaveLength(9);
+    expect(TOOL_NAMES).toHaveLength(9);
   });
 
   it('every TOOL_DEFINITIONS entry has matching name in TOOL_NAMES', () => {
