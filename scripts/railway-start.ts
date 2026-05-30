@@ -12,6 +12,13 @@
  *      `PRISMA_DEPLOY_STRATEGY=push` escape hatch is still available to
  *      run `db push --accept-data-loss` instead — useful only for the
  *      first deploy of a greenfield environment.
+ *      Recovery escape hatches (set on the service for ONE deploy, then
+ *      unset): `PRISMA_BASELINE_MIGRATIONS` for P3005 (non-empty DB,
+ *      empty history); and for P3009 (a migration recorded as failed)
+ *      either `PRISMA_RESET_FAILED_MIGRATIONS=true` (drops + re-applies
+ *      everything — safe only when there is no real data) or
+ *      `PRISMA_RESOLVE_ROLLED_BACK=<name|auto>` (marks the failed
+ *      migration rolled back and retries).
  *   3. Boot the custom `server.ts` via `tsx`, which wires up Next.js +
  *      Socket.io + the Agentic Loop in a single process.
  *
@@ -38,6 +45,34 @@ function nonEmptyEnv(key: string): string | undefined {
   const value = process.env[key];
   const trimmed = value?.trim();
   return trimmed && trimmed.length > 0 ? trimmed : undefined;
+}
+
+/**
+ * Parse a boolean-ish env var. Accepts the common truthy spellings so
+ * an operator does not have to remember exact casing.
+ */
+function boolEnv(key: string): boolean {
+  const value = nonEmptyEnv(key)?.toLowerCase();
+  return value !== undefined && ['1', 'true', 'on', 'yes'].includes(value);
+}
+
+/**
+ * Best-effort extraction of the failed migration's directory name from
+ * a Prisma `P3009` error message, e.g.
+ *   "The `0_init` migration started at ... failed"
+ * Returns `undefined` when no name can be parsed (the caller then
+ * requires an explicit name instead of guessing).
+ */
+function parseFailedMigrationName(output: string): string | undefined {
+  const patterns = [
+    /[`'"]([A-Za-z0-9_.-]+)[`'"]\s+migration\b/, // `0_init` migration ...
+    /\bmigration\s+[`'"]([A-Za-z0-9_.-]+)[`'"]/, // migration `0_init` ...
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(output);
+    if (match?.[1]) return match[1];
+  }
+  return undefined;
 }
 
 function encodeConnectionPart(value: string): string {
@@ -249,6 +284,84 @@ async function applySchema(): Promise<void> {
     console.log('==> retrying prisma migrate deploy after baselining');
     await run('npx', ['prisma', 'migrate', 'deploy']);
     return;
+  }
+
+  // P3009: the target database has a migration recorded as FAILED (it
+  // started but never finished), so Prisma refuses to apply anything
+  // until the history is repaired. This commonly happens when the very
+  // first migration was interrupted, or ran against a database that
+  // already had some objects. There is no safe one-size auto-fix, so we
+  // expose two explicit, operator-opted-in recovery paths and otherwise
+  // fail with precise instructions.
+  if (combined.includes('P3009')) {
+    const failedName = parseFailedMigrationName(combined);
+
+    // (a) DESTRUCTIVE reset — the right choice when the failed migration
+    //     is early (e.g. 0_init) and the database holds no real data yet.
+    //     Drops everything and re-applies every migration cleanly, so the
+    //     history ends up consistent. Gated behind an explicit env var
+    //     and a loud warning, mirroring the `db push --accept-data-loss`
+    //     escape hatch above.
+    if (boolEnv('PRISMA_RESET_FAILED_MIGRATIONS')) {
+      console.warn(
+        '==> P3009 + PRISMA_RESET_FAILED_MIGRATIONS=true: running ' +
+          '`prisma migrate reset --force --skip-seed`. THIS DROPS ALL DATA ' +
+          'in the target database and re-applies migrations from scratch. ' +
+          'Unset this variable after the deploy succeeds.',
+      );
+      await run('npx', [
+        'prisma',
+        'migrate',
+        'reset',
+        '--force',
+        '--skip-seed',
+      ]);
+      return;
+    }
+
+    // (b) NON-DESTRUCTIVE roll-back — the right choice when the failed
+    //     migration left NO partial objects behind (so re-applying it
+    //     will succeed). Marks it rolled back and retries deploy. Set
+    //     PRISMA_RESOLVE_ROLLED_BACK to the migration directory name, or
+    //     `auto` to use the name parsed from the P3009 message.
+    const resolveTarget = nonEmptyEnv('PRISMA_RESOLVE_ROLLED_BACK');
+    if (resolveTarget) {
+      const name = resolveTarget === 'auto' ? failedName : resolveTarget;
+      if (!name) {
+        throw new Error(
+          'PRISMA_RESOLVE_ROLLED_BACK=auto, but the failed migration name ' +
+            'could not be parsed from the P3009 output. Set it to the ' +
+            'explicit migration directory name instead (see prisma/migrations/).',
+        );
+      }
+      console.warn(
+        `==> P3009: marking failed migration '${name}' as rolled back, then retrying deploy. ` +
+          'If the retry fails with "already exists", the migration left partial ' +
+          'objects — use PRISMA_RESET_FAILED_MIGRATIONS=true (drops data) instead.',
+      );
+      await run('npx', ['prisma', 'migrate', 'resolve', '--rolled-back', name]);
+      console.log('==> retrying prisma migrate deploy after roll-back');
+      await run('npx', ['prisma', 'migrate', 'deploy']);
+      return;
+    }
+
+    throw new Error(
+      [
+        `prisma migrate deploy failed with P3009: a previous migration` +
+          (failedName ? ` (\`${failedName}\`)` : '') +
+          ` is recorded as FAILED in the database, blocking all new migrations.`,
+        'Pick ONE recovery path (set the variable on the Railway service, redeploy, then unset it):',
+        '• If this database has NO real data yet (e.g. the first migration never',
+        '  finished): set PRISMA_RESET_FAILED_MIGRATIONS=true to drop + re-apply',
+        '  everything cleanly.',
+        '• If the failed migration left nothing behind and you want to keep data:',
+        `  set PRISMA_RESOLVE_ROLLED_BACK=${failedName ?? '<migration-name>'} (or =auto)`,
+        '  to mark it rolled back and retry.',
+        '• Quick bootstrap without touching history: PRISMA_DEPLOY_STRATEGY=push',
+        '  (runs db push --accept-data-loss; leaves the failed row, so prefer the',
+        '  options above for a clean migration history).',
+      ].join(' '),
+    );
   }
 
   throw new Error(
