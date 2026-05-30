@@ -73,6 +73,11 @@ Railway 的 `startCommand` 已经是 `npx prisma migrate deploy && npx tsx serve
 > 启动脚本 (`scripts/railway-start.ts`) **不会自动 baseline**，因为审计发现"自动 baseline 全部目录"会静默跳过新 migration。
 > 处理方式：在 Railway 临时设置 `PRISMA_BASELINE_MIGRATIONS=0_init`（只列已经存在于库里的目录），重启一次成功后立即取消该 env。
 
+> **遇到 `P3009`（某条 migration 被记录为「失败」，比如 `0_init` 中断在半路)？** `migrate deploy` 会拒绝再跑任何迁移。启动脚本支持两条恢复路径（在 Railway 服务上临时设置变量、重启一次成功后立即取消）：
+> - **库里还没有真实数据**（首条迁移就没跑完，最常见）：设 `PRISMA_RESET_FAILED_MIGRATIONS=true` → 脚本跑 `prisma migrate reset --force --skip-seed`，**清库重建**所有迁移，历史归于干净。重建后记得重跑 seed（见 0.3）。
+> - **失败的迁移没留下任何半成品对象、且要保数据**：设 `PRISMA_RESOLVE_ROLLED_BACK=0_init`（或 `=auto` 让脚本从 P3009 日志里解析名字）→ 脚本标记其 rolled-back 后重试 deploy。若重试报 `already exists`，说明迁移留了半成品对象，改用上面的 reset。
+> - 应急（不动历史）：`PRISMA_DEPLOY_STRATEGY=push` 直接 `db push --accept-data-loss` 把 schema 顶上去；但失败记录仍在,后续要回到干净 `migrate deploy` 还得用上面两条之一。
+
 ---
 
 ### 0.3 ✅ `/api/admin/budget` 仍然在中间件鉴权之内（不是无 auth）
