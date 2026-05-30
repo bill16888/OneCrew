@@ -38,6 +38,7 @@
 | `AI_WAKE_MAX_HOPS`                 | `6`             | 唤醒链最大接力深度（方向 D, Req 22）；超出则抑制唤醒      |
 | `AI_WAKE_MAX_PAIR_REPEATS`         | `3`             | 同一有序对 fromAI→toAI 每条链最多触发次数；挡 A⇄B 乒乓 |
 | `AI_WAKE_MAX_CHAIN_ACTIVATIONS`    | `12`            | 整条链（扇出×深度）授权唤醒总数上限；管扇出的真护栏     |
+| `AI_HANDOFF_ENABLED`               | `false`         | AI→AI 交接工具 assign_task 总开关；false 时交接返回可恢复错误、不唤醒 |
 | `AI_INPUT_PRICE_PER_M_USD`         | `1.07`          | DeepSeek 改价时调整；默认对应 2026-05 公布的非缓存命中价 |
 | `AI_OUTPUT_PRICE_PER_M_USD`        | `1.10`          | 同上                                                      |
 | `AI_BUDGET_EXCEEDED_NOTICE`        | （留空 = 默认中文） | 非中文部署改成本地化文案，无需改代码                     |

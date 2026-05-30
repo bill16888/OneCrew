@@ -38,6 +38,12 @@ vi.mock('@/lib/services/task.service', () => ({
       total: 0,
       recentlyUpdated: [],
     })),
+    resolveHandoffTarget: vi.fn(async () => ({
+      ok: true,
+      id: 'ai_other',
+      name: 'Hopper',
+    })),
+    assign: vi.fn(async () => ({ taskId: 'PROJ-1', assigneeId: 'ai_other' })),
   },
 }));
 
@@ -89,14 +95,17 @@ const EXPECTED_TOOL_SET: readonly string[] = [
   // Direction D Req 20: read-only teammate status read. Property 12
   // amended in .kiro/specs/ai-collaboration/requirements.md (8 -> 9).
   'check_teammate_tasks',
+  // Direction D Req 21: AI task hand-off (the only wake-bearing tool).
+  // Property 12 amended (9 -> 10).
+  'assign_task',
 ];
 
 describe('Feature: ai-native-team-workspace, Property 12: 工具表面恒等', () => {
-  it('exposes exactly the 9 expected tools as a set', () => {
+  it('exposes exactly the 10 expected tools as a set', () => {
     const names = new Set(TOOL_DEFINITIONS.map((t) => t.name));
     expect(names).toEqual(new Set(EXPECTED_TOOL_SET));
-    expect(TOOL_DEFINITIONS).toHaveLength(9);
-    expect(TOOL_NAMES).toHaveLength(9);
+    expect(TOOL_DEFINITIONS).toHaveLength(10);
+    expect(TOOL_NAMES).toHaveLength(10);
   });
 
   it('every TOOL_DEFINITIONS entry has matching name in TOOL_NAMES', () => {
