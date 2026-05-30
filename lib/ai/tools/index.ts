@@ -1,5 +1,5 @@
 /**
- * @file AI tool surface (6 tools) + Zod input validation + dispatcher.
+ * @file AI tool surface (9 tools) + Zod input validation + dispatcher.
  *
  * The AI runtime (`lib/ai/runtime.ts`) hands every `tool_use` block returned
  * by Anthropic to {@link dispatchTool}. The dispatcher is the *only* path
@@ -12,7 +12,7 @@
  *    model as a `tool_result` with `is_error: true` so the next round can
  *    self-correct.
  *
- * 2. **Closed tool set**: The exposed surface is exactly the 6 tools
+ * 2. **Closed tool set**: The exposed surface is exactly the 9 tools
  *    declared in {@link TOOL_DEFINITIONS}. Any tool name outside
  *    {@link TOOL_NAMES} resolves with `is_error: true` and a
  *    `Unknown tool: ...` message (Requirement 5.3, Property 12).
@@ -45,7 +45,7 @@
  *   - `mock_web_search` and `mock_read_project_docs` return
  *     deterministic preset payloads from {@link ./mocks}.
  *
- * Validates: Requirements 5.1 (closed 6-tool surface), 5.2 (schema
+ * Validates: Requirements 5.1 (closed 9-tool surface), 5.2 (schema
  *            validation), 5.3 (unknown-tool rejection),
  *            10.3 (failed schema check yields `is_error` `tool_result`,
  *            no exception).
@@ -57,7 +57,7 @@ import { BUDGET_EXCEEDED_CODE, budget } from '@/lib/ai/budget';
 import { env } from '@/lib/env';
 import { ApprovalService } from '@/lib/services/approval.service';
 import { MessageService } from '@/lib/services/message.service';
-import { TaskService } from '@/lib/services/task.service';
+import { TaskService, type TeammateTaskSummary } from '@/lib/services/task.service';
 
 import { type AnthropicLikeToolResultBlock as ToolResultBlockParam } from '../openai-bridge';
 import { mockReadProjectDocs, mockWebSearch } from './mocks';
@@ -109,7 +109,7 @@ interface ApprovalAnalysisInput {
 }
 
 /**
- * The closed set of 6 tools exposed to the model on every `runCycle`.
+ * The closed set of 9 tools exposed to the model on every `runCycle`.
  *
  * Marked `as const` so:
  *  - The `name` literals propagate into {@link ToolName}, giving the rest
@@ -249,6 +249,18 @@ export const TOOL_DEFINITIONS = [
       required: ['owner', 'repo', 'path'],
     },
   },
+  {
+    name: 'check_teammate_tasks',
+    description:
+      "Read-only: look up what a teammate AI has been working on. Identify the teammate by aiUserId or aiName (provide at least one). Returns their task counts by column (Backlog / InProgress / InReview / Done) and the titles of tasks updated in the last 24 hours. No writes, no side effects — use it to synthesise a status read on a colleague.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        aiUserId: { type: 'string' },
+        aiName: { type: 'string' },
+      },
+    },
+  },
 ] as const;
 
 /**
@@ -335,6 +347,15 @@ export const TOOL_ZOD_SCHEMAS: Record<ToolName, z.ZodTypeAny> = {
     path: z.string().min(1).max(500),
     ref: z.string().min(1).max(100).optional(),
   }),
+
+  check_teammate_tasks: z
+    .object({
+      aiUserId: z.string().min(1).optional(),
+      aiName: z.string().min(1).max(200).optional(),
+    })
+    .refine((value) => Boolean(value.aiUserId ?? value.aiName), {
+      message: 'Provide aiUserId or aiName to identify the teammate.',
+    }),
 };
 
 // ---------------------------------------------------------------------------
@@ -346,7 +367,7 @@ export const TOOL_ZOD_SCHEMAS: Record<ToolName, z.ZodTypeAny> = {
  * caller AI's `User.id` so side-effect branches can attribute writes
  * (e.g. `Message.userId`, `Approval.aiUserId`) to the correct AI, and
  * an optional per-AI tool whitelist so operators can constrain custom
- * AIs to a subset of the 6-tool surface without changing the schema
+ * AIs to a subset of the 9-tool surface without changing the schema
  * list shipped to the model.
  */
 export interface ToolDispatchContext {
@@ -416,6 +437,32 @@ function buildToolResult(
   };
   if (isError) result.is_error = true;
   return result;
+}
+
+/**
+ * Render a {@link TeammateTaskSummary} into the concise text returned by
+ * the `check_teammate_tasks` tool (direction D, Req 20.3). Counts first,
+ * then up to 20 recently-updated task lines. Kept as a pure function so
+ * the formatting contract is unit-testable without the dispatcher.
+ */
+function renderTeammateSummary(
+  aiName: string,
+  summary: TeammateTaskSummary,
+): string {
+  const { counts, total, recentlyUpdated } = summary;
+  const header =
+    `Teammate ${aiName} — ${total} task(s) total: ` +
+    `Backlog ${counts.Backlog}, InProgress ${counts.InProgress}, ` +
+    `InReview ${counts.InReview}, Done ${counts.Done}.`;
+
+  if (recentlyUpdated.length === 0) {
+    return `${header}\nNo tasks updated in the last 24h.`;
+  }
+
+  const lines = recentlyUpdated
+    .map((task) => `- ${task.taskId} [${task.status}] ${task.title}`)
+    .join('\n');
+  return `${header}\nUpdated in the last 24h:\n${lines}`;
 }
 
 function firstNonBlank(...values: Array<string | undefined>): string | null {
@@ -610,7 +657,7 @@ export async function dispatchTool(
     );
   }
 
-  // From here on, `call.name` is one of the 6 known names because the
+  // From here on, `call.name` is one of the known tool names because the
   // schema lookup succeeded. Cast once and `switch` exhaustively so any
   // future addition to TOOL_DEFINITIONS triggers a compile error here.
   const name = call.name as ToolName;
@@ -801,6 +848,37 @@ export async function dispatchTool(
             readProjectDocs({ owner, repo, path, ref, signal }),
         );
         return buildToolResult(call.id, result.content, !result.ok);
+      }
+
+      case 'check_teammate_tasks': {
+        // Direction D, Req 20 — read-only teammate status read. Resolve
+        // the target AI by id or name within the workspace, then render
+        // a concise summary of its task load. No wake, no write, no
+        // chain — this is the SAFE phase (D1). Both the resolve and the
+        // summary are workspace-scoped Prisma reads behind TaskService,
+        // so a missing/unknown target resolves to an `is_error` here and
+        // a thrown read error is normalised by the outer try/catch
+        // (Property 13). No per-call budget charge (Req 20.5).
+        const { aiUserId, aiName } = input as {
+          aiUserId?: string;
+          aiName?: string;
+        };
+        const target = await TaskService.resolveTeammate({ aiUserId, aiName });
+        if (!target) {
+          const selector = aiName
+            ? `name "${aiName}"`
+            : `id "${aiUserId ?? ''}"`;
+          return buildToolResult(
+            call.id,
+            `No teammate AI found for ${selector} in this workspace.`,
+            true,
+          );
+        }
+        const summary = await TaskService.summarizeForAI(target.id);
+        return buildToolResult(
+          call.id,
+          renderTeammateSummary(target.name, summary),
+        );
       }
 
       default: {

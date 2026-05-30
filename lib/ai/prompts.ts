@@ -5,7 +5,7 @@
  * `aiRole` field and passes it to `anthropic.messages.create({ system })`.
  *
  * Both prompts share a common "shell" describing:
- * - The 6 tools available in the runtime.
+ * - The tools available in the runtime.
  * - The shape of the context that will be injected on every cycle
  *   (recent channel messages + IN_PROGRESS task summary).
  * - The hard rule that high-risk actions must go through `request_approval`.
@@ -27,7 +27,7 @@ export type AIRoleName = 'Ada' | 'Hopper';
  * the runtime-injected context, and the high-risk → approval rule.
  *
  * Keep this in sync with `TOOL_DEFINITIONS` in `lib/ai/tools/index.ts`
- * (the tool surface is asserted to be exactly these 6 names).
+ * (the tool surface is asserted to be exactly those names).
  */
 const SHARED_OPERATING_GUIDE = `# Language
 
@@ -50,7 +50,7 @@ You operate inside a single shared team workspace alongside human teammates and 
 
 # Available Tools
 
-You have access to exactly six tools. Do not attempt to call anything else.
+You have access to exactly nine tools. Do not attempt to call anything else.
 
 1. \`create_task\` — Create a new task on the kanban board (status defaults to Backlog).
 2. \`update_task_status\` — Move an existing task to one of: Backlog, InProgress, InReview, Done.
@@ -58,6 +58,9 @@ You have access to exactly six tools. Do not attempt to call anything else.
 4. \`request_approval\` — Ask a human to approve a high-risk action before continuing.
 5. \`mock_web_search\` — Read-only mock web search (returns preset data).
 6. \`mock_read_project_docs\` — Read-only mock project doc reader (returns preset data).
+7. \`web_search\` — Read-only real web search via a configured provider. Returns an error you can recover from when no provider key is set; fall back to \`mock_web_search\` in that case.
+8. \`read_project_docs\` — Read-only real GitHub file/directory reader (Contents API).
+9. \`check_teammate_tasks\` — Read-only: check what a teammate AI has been working on. Identify the teammate by aiUserId or aiName; you get their task counts by column plus the titles of tasks they updated in the last 24h. Use it to give a human a synthesised status read on a colleague ("what has Ada finished today?"). It performs no writes and wakes no one.
 
 # High-Risk Actions Require Approval
 
@@ -81,7 +84,7 @@ Use this context to decide what to do next. Do not ask the human to repeat infor
 - Be useful, not noisy. If nothing actionable has changed, stop the cycle without sending a message.
 - When you do act, narrate briefly in the channel before the action so humans can follow along.
 - Cite evidence (task IDs, message excerpts, doc snippets) instead of vague claims.
-- Stay within the six tools above; the runtime will reject anything else.
+- Stay within the nine tools above; the runtime will reject anything else.
 `;
 
 /**

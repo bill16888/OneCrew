@@ -295,6 +295,151 @@ export async function list(): Promise<Task[]> {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Teammate task summary (direction D, Req 20 — check_teammate_tasks)
+// ---------------------------------------------------------------------------
+
+/**
+ * Lookback window (ms) used by {@link summarizeForAI} to decide which
+ * tasks count as "recently updated". 24 hours per Req 20.3.
+ */
+const RECENT_TASK_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Hard cap on how many recently-updated task titles {@link summarizeForAI}
+ * returns, so a prolific AI cannot blow up the model's context budget
+ * when a teammate inspects it.
+ */
+const RECENT_TASK_LIMIT = 20;
+
+/**
+ * One recently-touched task in a {@link TeammateTaskSummary}.
+ */
+export interface RecentTeammateTask {
+  /** Human-readable `PROJ-{N}` identifier. */
+  readonly taskId: string;
+  /** Task title. */
+  readonly title: string;
+  /** Current column. */
+  readonly status: TaskStatus;
+}
+
+/**
+ * Read-only summary of a single AI colleague's task load, returned by
+ * the `check_teammate_tasks` tool (direction D, Req 20). Carries counts
+ * by status and the titles of tasks updated in the last 24h. No side
+ * effects — this is a pure read.
+ */
+export interface TeammateTaskSummary {
+  /** Count of the AI's tasks in each of the four columns. */
+  readonly counts: Record<TaskStatus, number>;
+  /** Total number of tasks created by OR assigned to the AI. */
+  readonly total: number;
+  /** Tasks updated within the last {@link RECENT_TASK_WINDOW_MS}. */
+  readonly recentlyUpdated: readonly RecentTeammateTask[];
+}
+
+/**
+ * Resolve a teammate AI by id or name within the active workspace.
+ *
+ * The `check_teammate_tasks` tool lets one AI inspect another by either
+ * the target's `User.id` (`aiUserId`) or its display `name`
+ * (`aiName`). This helper performs the workspace-scoped lookup so the
+ * dispatcher never reads Prisma directly and the resolution stays
+ * testable behind a service mock.
+ *
+ * Resolution order: try `aiUserId` first (exact id match), then
+ * `aiName` (case-insensitive equality). Only users with `isAI === true`
+ * in the active workspace are eligible — a human's name can never
+ * resolve here. Returns `null` when nothing matches; callers translate
+ * that into an `is_error` tool_result.
+ *
+ * Read-only: no writes, no broadcasts, no wakes (Req 20.3).
+ *
+ * @param selector At least one of `aiUserId` / `aiName` (the tool's
+ *   Zod schema enforces "at least one present" before this runs).
+ * @returns The resolved teammate's `{ id, name }`, or `null`.
+ */
+export async function resolveTeammate(selector: {
+  aiUserId?: string;
+  aiName?: string;
+}): Promise<{ id: string; name: string } | null> {
+  const workspaceId = resolveWorkspaceId();
+  const aiUserId = selector.aiUserId?.trim();
+  const aiName = selector.aiName?.trim();
+
+  if (aiUserId) {
+    const byId = await prisma.user.findFirst({
+      where: { id: aiUserId, isAI: true, workspaceId },
+      select: { id: true, name: true },
+    });
+    if (byId) return byId;
+  }
+
+  if (aiName) {
+    const byName = await prisma.user.findFirst({
+      where: {
+        name: { equals: aiName, mode: 'insensitive' },
+        isAI: true,
+        workspaceId,
+      },
+      select: { id: true, name: true },
+    });
+    if (byName) return byName;
+  }
+
+  return null;
+}
+
+/**
+ * Summarise a teammate AI's task load (direction D, Req 20.3).
+ *
+ * Counts every task the AI either created or is assigned to, grouped by
+ * the four Kanban columns, and returns the titles of those updated in
+ * the last 24h (capped at {@link RECENT_TASK_LIMIT}, newest first).
+ *
+ * Scoped by `workspaceId` (audit H4) so a future multi-workspace
+ * migration cannot let one workspace inspect another's tasks. Pure
+ * read: no writes, no broadcasts, no wakes.
+ *
+ * @param aiUserId `User.id` of the teammate AI (already resolved via
+ *   {@link resolveTeammate}).
+ * @returns A {@link TeammateTaskSummary}.
+ */
+export async function summarizeForAI(
+  aiUserId: string,
+): Promise<TeammateTaskSummary> {
+  const workspaceId = resolveWorkspaceId();
+
+  const tasks = await prisma.task.findMany({
+    where: {
+      workspaceId,
+      OR: [{ creatorId: aiUserId }, { assigneeId: aiUserId }],
+    },
+    select: { taskId: true, title: true, status: true, updatedAt: true },
+    orderBy: { updatedAt: 'desc' },
+  });
+
+  const counts = Object.fromEntries(
+    TASK_STATUSES.map((status) => [status, 0]),
+  ) as Record<TaskStatus, number>;
+  for (const task of tasks) {
+    counts[task.status as TaskStatus] += 1;
+  }
+
+  const cutoff = Date.now() - RECENT_TASK_WINDOW_MS;
+  const recentlyUpdated: RecentTeammateTask[] = tasks
+    .filter((task) => task.updatedAt.getTime() >= cutoff)
+    .slice(0, RECENT_TASK_LIMIT)
+    .map((task) => ({
+      taskId: task.taskId,
+      title: task.title,
+      status: task.status as TaskStatus,
+    }));
+
+  return { counts, total: tasks.length, recentlyUpdated };
+}
+
 /**
  * Aggregated namespace export so callers can use either named imports
  * or the `TaskService.method(...)` style favored across the spec.
@@ -303,4 +448,6 @@ export const TaskService = {
   create,
   updateStatus,
   list,
+  resolveTeammate,
+  summarizeForAI,
 } as const;

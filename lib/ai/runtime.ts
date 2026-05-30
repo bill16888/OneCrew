@@ -11,7 +11,7 @@
  *     issued for an AI colleague with `aiRole = r` carries
  *     `system === SYSTEM_PROMPTS[r]`.
  *   - **Closed tool surface** (Property 12): every Anthropic call passes
- *     the same 6-tool set defined in {@link TOOL_DEFINITIONS}.
+ *     the same closed tool set defined in {@link TOOL_DEFINITIONS}.
  *   - **Bounded autonomy**:
  *       - At most {@link MAX_ROUNDS} `tool_use` rounds per cycle
  *         (Property 22 — Requirements 7.3, 7.4).
