@@ -94,12 +94,18 @@ Railway 的 `startCommand` 已经是 `npx prisma migrate deploy && npx tsx serve
 
 ### 0.3 ✅ Seed 数据存在（Ada / Hopper 两个 AI 用户）
 
-迁移成功 ≠ 数据进了。首次部署需要手动跑一次 seed：
+迁移成功 ≠ 数据进了。首次部署需要跑一次 seed。**最省事的方式（推荐,容器内执行,直连内网 DB)**:
 
-```bash
-# Railway → 点项目 → Settings → Service → Run Command
-npm run prisma:seed
 ```
+# Railway → app 服务 → Variables → 加 SEED_ON_BOOT=true → Redeploy
+# 看到日志 "==> seed complete" 后,立即删掉 SEED_ON_BOOT(否则每次 boot 都会重跑)
+```
+
+`SEED_ON_BOOT` 由 `scripts/railway-start.ts` 处理:在迁移之后、起服务之前跑一次幂等 seed;失败**不**会让容器崩溃(只打日志),所以 seed 配错变量不会拖垮已就绪的 schema。
+
+> ⚠️ 生产 (`NODE_ENV=production`) 下 seed **拒绝**用 demo 默认值,必须先设:`SEED_HUMAN_PASSWORD`、`WORKSPACE_NAME`、`SEED_EMAIL_DOMAIN`、`AI_AGENT_NAMES_JSON`(格式见 `.env.example`)。缺哪个,日志的 "seed failed" 行会点名。
+
+备选(本地 / CLI):`npm run prisma:seed`(在 Railway "Run Command" 里,或本地用 Postgres 的**公网** URL `DATABASE_PUBLIC_URL`,内网地址本地连不上)。
 
 预期日志输出（来自 `prisma/seed.ts`）：
 

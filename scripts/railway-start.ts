@@ -19,7 +19,10 @@
  *      everything — safe only when there is no real data) or
  *      `PRISMA_RESOLVE_ROLLED_BACK=<name|auto>` (marks the failed
  *      migration rolled back and retries).
- *   3. Boot the custom `server.ts` via `tsx`, which wires up Next.js +
+ *   3. Optionally run the idempotent database seed when `SEED_ON_BOOT`
+ *      is set (the easiest way to seed a Railway DB from inside the
+ *      container). Non-fatal on failure.
+ *   4. Boot the custom `server.ts` via `tsx`, which wires up Next.js +
  *      Socket.io + the Agentic Loop in a single process.
  *
  * The wrapper exits non-zero on any failure so the container restarts
@@ -370,6 +373,46 @@ async function applySchema(): Promise<void> {
   );
 }
 
+/**
+ * Optionally run the database seed on boot (opt-in via `SEED_ON_BOOT`).
+ *
+ * The seed (`prisma/seed.ts`) is idempotent (upserts), so re-running it
+ * is safe. Running it from inside the container is the easiest way to
+ * seed a Railway database, because the seed reaches the INTERNAL
+ * Postgres host (`*.railway.internal`) that a local `railway run`
+ * cannot, and the production seed env vars (`SEED_HUMAN_PASSWORD`,
+ * `WORKSPACE_NAME`, `SEED_EMAIL_DOMAIN`, `AI_AGENT_NAMES_JSON`) are
+ * already present on the service.
+ *
+ * Failures are NON-FATAL: the schema is already applied and the server
+ * can run without seed data. The most common failure is a missing
+ * production seed var (the seed refuses to run with demo defaults when
+ * NODE_ENV=production), so we log the cause loudly and continue to
+ * start the server rather than crash-looping. Set `SEED_ON_BOOT=true`
+ * for ONE deploy, confirm the "seed complete" line, then unset it so
+ * every subsequent boot does not re-run the seed.
+ */
+async function maybeSeed(): Promise<void> {
+  if (!boolEnv('SEED_ON_BOOT')) return;
+
+  console.warn(
+    '==> SEED_ON_BOOT=true: running the database seed (idempotent). ' +
+      'Unset this variable after you see "seed complete".',
+  );
+  try {
+    await run('node_modules/.bin/tsx', ['prisma/seed.ts']);
+    console.log('==> seed complete');
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(
+      '==> seed failed (continuing to start the server anyway): ' +
+        `${message}. In production the seed requires SEED_HUMAN_PASSWORD, ` +
+        'WORKSPACE_NAME, SEED_EMAIL_DOMAIN, and AI_AGENT_NAMES_JSON to be set ' +
+        '(see .env.example). Fix those, then redeploy with SEED_ON_BOOT=true.',
+    );
+  }
+}
+
 async function main(): Promise<void> {
   normaliseEnv();
 
@@ -384,6 +427,7 @@ async function main(): Promise<void> {
   }
 
   await applySchema();
+  await maybeSeed();
 
   console.log('==> starting server.ts via tsx');
   await run('node_modules/.bin/tsx', ['server.ts']);
