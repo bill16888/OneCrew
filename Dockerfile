@@ -20,7 +20,7 @@
 # ----------------------------------------------------------------------
 # Stage 1 — install all npm dependencies (including dev) for the build
 # ----------------------------------------------------------------------
-FROM node:20-alpine AS deps
+FROM node:22-alpine AS deps
 
 WORKDIR /app
 

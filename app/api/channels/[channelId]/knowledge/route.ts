@@ -31,7 +31,8 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 interface RouteContext {
-  params: { channelId: string };
+  // Next.js 15: dynamic route `params` is asynchronous.
+  params: Promise<{ channelId: string }>;
 }
 
 interface KnowledgeResponse {

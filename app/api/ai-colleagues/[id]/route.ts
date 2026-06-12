@@ -23,7 +23,8 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 interface RouteProps {
-  params: { id: string };
+  // Next.js 15: dynamic route `params` is asynchronous.
+  params: Promise<{ id: string }>;
 }
 
 const PATCH_AI_COLLEAGUE_BODY = z

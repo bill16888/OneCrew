@@ -34,7 +34,8 @@ import { MessageService } from '@/lib/services/message.service';
  */
 
 interface ChannelPageProps {
-  params: { channelId: string };
+  // Next.js 15: dynamic route `params` is asynchronous.
+  params: Promise<{ channelId: string }>;
 }
 
 /**

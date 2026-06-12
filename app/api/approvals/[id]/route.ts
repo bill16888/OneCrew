@@ -68,7 +68,8 @@ export const dynamic = 'force-dynamic';
  * router owns its construction.
  */
 interface RouteContext {
-  params: { id: string };
+  // Next.js 15: dynamic route `params` is asynchronous.
+  params: Promise<{ id: string }>;
 }
 
 /**

@@ -42,7 +42,8 @@ export const dynamic = 'force-dynamic';
  * `[channelId]` segment.
  */
 interface RouteContext {
-  params: { channelId: string };
+  // Next.js 15: dynamic route `params` is asynchronous.
+  params: Promise<{ channelId: string }>;
 }
 
 /**
