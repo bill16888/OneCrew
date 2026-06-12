@@ -108,7 +108,7 @@ RUN npx prisma generate
 # ----------------------------------------------------------------------
 # Stage 4 — minimal production runtime
 # ----------------------------------------------------------------------
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 
 WORKDIR /app
 

@@ -131,7 +131,8 @@ export async function DELETE(
   );
   if (limited) return limited;
 
-  if (!(await assertChannelInWorkspace(params.channelId))) {
+  const { channelId } = await params;
+  if (!(await assertChannelInWorkspace(channelId))) {
     return errorResponse('Channel not found in this workspace.', 404);
   }
 
@@ -144,8 +145,8 @@ export async function DELETE(
   }
 
   try {
-    await ChannelService.removeMember(params.channelId, userId);
-    const members = await ChannelService.listMembers(params.channelId);
+    await ChannelService.removeMember(channelId, userId);
+    const members = await ChannelService.listMembers(channelId);
     return NextResponse.json<ChannelMemberView[]>(members, { status: 200 });
   } catch {
     return errorResponse('Failed to remove member.', 500);
