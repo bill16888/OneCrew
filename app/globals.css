@@ -1,9 +1,11 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
+@import 'tw-animate-css';
 
 /*
- * Dark-theme tokens (Requirements 9.1, 9.2, 9.3).
+ * Tailwind CSS v4 (CSS-first configuration).
+ *
+ * The former `tailwind.config.ts` design tokens now live in the
+ * `@theme` block below. Dark-theme tokens (Requirements 9.1, 9.2, 9.3):
  *  - Background: #0A0A0A
  *  - Primary: Indigo #6366F1
  *  - AI Badge gradient: #A855F7 → #6366F1 (use bg-ai-gradient)
@@ -11,18 +13,122 @@
  * The whole MVP is dark-only, so we apply the `dark` class on <html> in
  * app/layout.tsx and force color-scheme: dark here.
  */
+
+/* Class-based dark mode (was `darkMode: 'class'` in the v3 config). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', Menlo, Monaco, Consolas, monospace;
+
+  /* Canvas + surface scale tuned for the #0A0A0A base */
+  --color-background: #0a0a0a;
+  --color-foreground: #f5f5f5;
+
+  /*
+   * Operator-configurable brand accent, driven by the `--brand` CSS
+   * variable declared in @layer base below (Phase 1 Req 16.4).
+   */
+  --color-brand: var(--brand);
+
+  --color-surface: #111113;
+  --color-surface-raised: #17171a;
+  --color-surface-overlay: #1f1f23;
+
+  --color-border: #27272a;
+
+  --color-muted: #1a1a1d;
+  --color-muted-foreground: #a1a1aa;
+
+  /* Indigo primary (Requirements 9.1) */
+  --color-primary: #6366f1;
+  --color-primary-foreground: #ffffff;
+  --color-primary-50: #eef2ff;
+  --color-primary-100: #e0e7ff;
+  --color-primary-200: #c7d2fe;
+  --color-primary-300: #a5b4fc;
+  --color-primary-400: #818cf8;
+  --color-primary-500: #6366f1;
+  --color-primary-600: #4f46e5;
+  --color-primary-700: #4338ca;
+  --color-primary-800: #3730a3;
+  --color-primary-900: #312e81;
+
+  /* Purple — AI Badge & AI message accents (Requirements 9.2, 9.3) */
+  --color-ai: #a855f7;
+  --color-ai-accent: #a855f7;
+  --color-ai-50: #faf5ff;
+  --color-ai-100: #f3e8ff;
+  --color-ai-200: #e9d5ff;
+  --color-ai-300: #d8b4fe;
+  --color-ai-400: #c084fc;
+  --color-ai-500: #a855f7;
+  --color-ai-600: #9333ea;
+  --color-ai-700: #7e22ce;
+  --color-ai-800: #6b21a8;
+  --color-ai-900: #581c87;
+
+  --color-destructive: #ef4444;
+  --color-destructive-foreground: #ffffff;
+  --color-success: #10b981;
+  --color-success-foreground: #ffffff;
+
+  /* AI Badge gradient — used on AI messages and AI task cards */
+  --background-image-ai-gradient: linear-gradient(
+    135deg,
+    #a855f7 0%,
+    #6366f1 100%
+  );
+
+  --radius-lg: 0.75rem;
+  --radius-md: 0.5rem;
+  --radius-sm: 0.375rem;
+
+  --shadow-ai-glow:
+    0 0 0 1px rgba(168, 85, 247, 0.4), 0 0 24px rgba(99, 102, 241, 0.25);
+
+  --animate-ai-pulse: ai-pulse 1.5s ease-in-out infinite;
+
+  @keyframes ai-pulse {
+    0%,
+    100% {
+      opacity: 0.65;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+}
+
+/* Container settings carried over from the v3 config (center + padding). */
+@utility container {
+  margin-inline: auto;
+  padding-inline: 1rem;
+}
+
 @layer base {
   :root {
     color-scheme: dark;
     /*
      * Brand accent (Phase 1 Req 16.4). Defaults to the indigo primary
      * (#6366F1) but an operator can override it without touching
-     * component code — e.g. inject a different value via a build-time
-     * env or a runtime <style> tag. Tailwind exposes this as the
-     * `brand` color (see tailwind.config.ts), so `text-brand`,
-     * `bg-brand`, `border-brand`, etc. all follow this variable.
+     * component code. Tailwind exposes this as the `brand` color, so
+     * `text-brand`, `bg-brand`, `border-brand`, etc. follow this var.
      */
     --brand: #6366f1;
+  }
+
+  /*
+   * Tailwind v4 changed the default border color to `currentColor`.
+   * Restore the project's previous behaviour using the border token so
+   * bare `border` utilities keep their v3 appearance.
+   */
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-border);
   }
 
   html,
@@ -31,12 +137,7 @@
   }
 
   body {
-    font-family:
-      Inter,
-      system-ui,
-      -apple-system,
-      'Segoe UI',
-      sans-serif;
+    font-family: var(--font-sans);
   }
 
   /* AI message left accent — used by components/channel/MessageRow.tsx */
