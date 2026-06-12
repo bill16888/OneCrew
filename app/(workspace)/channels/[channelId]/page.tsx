@@ -70,7 +70,7 @@ async function resolveChannelId(segment: string): Promise<string | null> {
 export default async function ChannelPage({
   params,
 }: ChannelPageProps): Promise<JSX.Element> {
-  const { channelId: segment } = params;
+  const { channelId: segment } = await params;
 
   const resolvedChannelId = await resolveChannelId(segment);
 

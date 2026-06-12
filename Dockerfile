@@ -36,7 +36,7 @@ RUN npm ci --no-audit --no-fund
 # ----------------------------------------------------------------------
 # Stage 2 — generate Prisma client and build Next.js
 # ----------------------------------------------------------------------
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 

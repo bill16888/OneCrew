@@ -58,12 +58,13 @@ export async function GET(
   const session = await requireSession();
   if (session instanceof NextResponse) return session;
 
-  if (!(await assertChannelInWorkspace(params.channelId))) {
+  const { channelId } = await params;
+  if (!(await assertChannelInWorkspace(channelId))) {
     return errorResponse('Channel not found in this workspace.', 404);
   }
 
   try {
-    const content = await ChannelService.getKnowledge(params.channelId);
+    const content = await ChannelService.getKnowledge(channelId);
     return NextResponse.json<KnowledgeResponse>({ content }, { status: 200 });
   } catch {
     return errorResponse('Failed to load channel knowledge.', 500);

@@ -62,7 +62,7 @@ export async function GET(
     );
   }
 
-  const channelId = context.params.channelId;
+  const { channelId } = await context.params;
   if (typeof channelId !== 'string' || channelId.length === 0) {
     return NextResponse.json(
       { error: 'Path parameter "channelId" must be a non-empty string.' },

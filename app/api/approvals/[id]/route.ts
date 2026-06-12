@@ -181,17 +181,18 @@ export async function PATCH(
   // 5. Delegate to the service layer. Each branch transitions the row
   //    and — on a successful commit — emits the matching event on the
   //    agentic emitter (`wakeup` for approve, `reject` for reject).
+  const { id: approvalId } = await params;
   try {
     const approval =
       body.decision === 'approve'
-        ? await ApprovalService.approve(params.id, decidedById)
-        : await ApprovalService.reject(params.id, decidedById);
+        ? await ApprovalService.approve(approvalId, decidedById)
+        : await ApprovalService.reject(approvalId, decidedById);
     return NextResponse.json<Approval>(approval, { status: 200 });
   } catch (err) {
     // 6a. Prisma "record not found" → 404 so the client can surface
     //     a distinct "this approval no longer exists" message.
     if (isPrismaNotFoundError(err)) {
-      return errorResponse(`Approval "${params.id}" not found.`, 404);
+      return errorResponse(`Approval "${approvalId}" not found.`, 404);
     }
     // 6b. Anything else is treated as an internal failure. The
     //     service layer guarantees no realtime event has been emitted
