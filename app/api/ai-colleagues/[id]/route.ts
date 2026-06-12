@@ -190,7 +190,8 @@ export async function DELETE(
   );
   if (limited) return limited;
 
-  const existing = await findAIColleague(params.id);
+  const { id } = await params;
+  const existing = await findAIColleague(id);
   if (!existing) {
     return errorResponse('AI colleague not found.', 404);
   }

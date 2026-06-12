@@ -85,7 +85,8 @@ export async function PUT(
   );
   if (limited) return limited;
 
-  if (!(await assertChannelInWorkspace(params.channelId))) {
+  const { channelId } = await params;
+  if (!(await assertChannelInWorkspace(channelId))) {
     return errorResponse('Channel not found in this workspace.', 404);
   }
 
@@ -104,7 +105,7 @@ export async function PUT(
   }
 
   try {
-    await ChannelService.setKnowledge(params.channelId, parsed.data.content);
+    await ChannelService.setKnowledge(channelId, parsed.data.content);
     return NextResponse.json<KnowledgeResponse>(
       { content: parsed.data.content },
       { status: 200 },

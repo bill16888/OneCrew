@@ -89,7 +89,7 @@ RUN npm run build
 #
 # We also generate the Prisma client here because `npm ci` blows away
 # whatever `npx prisma generate` produced in the builder stage.
-FROM node:20-alpine AS prod-deps
+FROM node:22-alpine AS prod-deps
 
 WORKDIR /app
 

@@ -83,7 +83,8 @@ export async function POST(
   );
   if (limited) return limited;
 
-  if (!(await assertChannelInWorkspace(params.channelId))) {
+  const { channelId } = await params;
+  if (!(await assertChannelInWorkspace(channelId))) {
     return errorResponse('Channel not found in this workspace.', 404);
   }
 
@@ -108,8 +109,8 @@ export async function POST(
   }
 
   try {
-    await ChannelService.addMember(params.channelId, parsed.data.userId);
-    const members = await ChannelService.listMembers(params.channelId);
+    await ChannelService.addMember(channelId, parsed.data.userId);
+    const members = await ChannelService.listMembers(channelId);
     return NextResponse.json<ChannelMemberView[]>(members, { status: 200 });
   } catch {
     return errorResponse('Failed to add member.', 500);
