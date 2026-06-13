@@ -42,7 +42,8 @@ export const dynamic = 'force-dynamic';
  * `[channelId]` segment.
  */
 interface RouteContext {
-  params: { channelId: string };
+  // Next.js 15: dynamic route `params` is asynchronous.
+  params: Promise<{ channelId: string }>;
 }
 
 /**
@@ -61,7 +62,7 @@ export async function GET(
     );
   }
 
-  const channelId = context.params.channelId;
+  const { channelId } = await context.params;
   if (typeof channelId !== 'string' || channelId.length === 0) {
     return NextResponse.json(
       { error: 'Path parameter "channelId" must be a non-empty string.' },

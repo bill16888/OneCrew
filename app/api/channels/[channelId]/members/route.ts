@@ -32,7 +32,8 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 interface RouteContext {
-  params: { channelId: string };
+  // Next.js 15: dynamic route `params` is asynchronous.
+  params: Promise<{ channelId: string }>;
 }
 
 const ADD_MEMBER_BODY = z.object({
@@ -55,12 +56,13 @@ export async function GET(
   const session = await requireSession();
   if (session instanceof NextResponse) return session;
 
-  if (!(await assertChannelInWorkspace(params.channelId))) {
+  const { channelId } = await params;
+  if (!(await assertChannelInWorkspace(channelId))) {
     return errorResponse('Channel not found in this workspace.', 404);
   }
 
   try {
-    const members = await ChannelService.listMembers(params.channelId);
+    const members = await ChannelService.listMembers(channelId);
     return NextResponse.json<ChannelMemberView[]>(members, { status: 200 });
   } catch {
     return errorResponse('Failed to load channel members.', 500);
@@ -81,7 +83,8 @@ export async function POST(
   );
   if (limited) return limited;
 
-  if (!(await assertChannelInWorkspace(params.channelId))) {
+  const { channelId } = await params;
+  if (!(await assertChannelInWorkspace(channelId))) {
     return errorResponse('Channel not found in this workspace.', 404);
   }
 
@@ -106,8 +109,8 @@ export async function POST(
   }
 
   try {
-    await ChannelService.addMember(params.channelId, parsed.data.userId);
-    const members = await ChannelService.listMembers(params.channelId);
+    await ChannelService.addMember(channelId, parsed.data.userId);
+    const members = await ChannelService.listMembers(channelId);
     return NextResponse.json<ChannelMemberView[]>(members, { status: 200 });
   } catch {
     return errorResponse('Failed to add member.', 500);
@@ -128,7 +131,8 @@ export async function DELETE(
   );
   if (limited) return limited;
 
-  if (!(await assertChannelInWorkspace(params.channelId))) {
+  const { channelId } = await params;
+  if (!(await assertChannelInWorkspace(channelId))) {
     return errorResponse('Channel not found in this workspace.', 404);
   }
 
@@ -141,8 +145,8 @@ export async function DELETE(
   }
 
   try {
-    await ChannelService.removeMember(params.channelId, userId);
-    const members = await ChannelService.listMembers(params.channelId);
+    await ChannelService.removeMember(channelId, userId);
+    const members = await ChannelService.listMembers(channelId);
     return NextResponse.json<ChannelMemberView[]>(members, { status: 200 });
   } catch {
     return errorResponse('Failed to remove member.', 500);

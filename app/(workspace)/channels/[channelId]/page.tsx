@@ -34,7 +34,8 @@ import { MessageService } from '@/lib/services/message.service';
  */
 
 interface ChannelPageProps {
-  params: { channelId: string };
+  // Next.js 15: dynamic route `params` is asynchronous.
+  params: Promise<{ channelId: string }>;
 }
 
 /**
@@ -69,7 +70,7 @@ async function resolveChannelId(segment: string): Promise<string | null> {
 export default async function ChannelPage({
   params,
 }: ChannelPageProps): Promise<JSX.Element> {
-  const { channelId: segment } = params;
+  const { channelId: segment } = await params;
 
   const resolvedChannelId = await resolveChannelId(segment);
 

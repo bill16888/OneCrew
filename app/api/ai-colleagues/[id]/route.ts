@@ -23,7 +23,8 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 interface RouteProps {
-  params: { id: string };
+  // Next.js 15: dynamic route `params` is asynchronous.
+  params: Promise<{ id: string }>;
 }
 
 const PATCH_AI_COLLEAGUE_BODY = z
@@ -151,7 +152,8 @@ export async function PATCH(
     return errorResponse(formatZodError(parsed.error), 400);
   }
 
-  const existing = await findAIColleague(params.id);
+  const { id } = await params;
+  const existing = await findAIColleague(id);
   if (!existing) {
     return errorResponse('AI colleague not found.', 404);
   }
@@ -188,7 +190,8 @@ export async function DELETE(
   );
   if (limited) return limited;
 
-  const existing = await findAIColleague(params.id);
+  const { id } = await params;
+  const existing = await findAIColleague(id);
   if (!existing) {
     return errorResponse('AI colleague not found.', 404);
   }

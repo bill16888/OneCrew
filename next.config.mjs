@@ -62,11 +62,10 @@ const SECURITY_HEADERS = [
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  experimental: {
-    // OpenAI SDK (used to call DeepSeek) and other Node-only deps stay
-    // on the server so they don't get bundled into client components.
-    serverComponentsExternalPackages: ['openai', 'pino', 'pino-pretty'],
-  },
+  // OpenAI SDK (used to call DeepSeek) and other Node-only deps stay
+  // on the server so they don't get bundled into client components.
+  // Next.js 15: renamed from `experimental.serverComponentsExternalPackages`.
+  serverExternalPackages: ['openai', 'pino', 'pino-pretty'],
   /**
    * Apply the security header bundle to every route.
    * Per Next.js docs, headers declared here are merged with anything

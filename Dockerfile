@@ -20,7 +20,7 @@
 # ----------------------------------------------------------------------
 # Stage 1 — install all npm dependencies (including dev) for the build
 # ----------------------------------------------------------------------
-FROM node:20-alpine AS deps
+FROM node:22-alpine AS deps
 
 WORKDIR /app
 
@@ -36,7 +36,7 @@ RUN npm ci --no-audit --no-fund
 # ----------------------------------------------------------------------
 # Stage 2 — generate Prisma client and build Next.js
 # ----------------------------------------------------------------------
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
@@ -89,7 +89,7 @@ RUN npm run build
 #
 # We also generate the Prisma client here because `npm ci` blows away
 # whatever `npx prisma generate` produced in the builder stage.
-FROM node:20-alpine AS prod-deps
+FROM node:22-alpine AS prod-deps
 
 WORKDIR /app
 
@@ -108,7 +108,7 @@ RUN npx prisma generate
 # ----------------------------------------------------------------------
 # Stage 4 — minimal production runtime
 # ----------------------------------------------------------------------
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 
 WORKDIR /app
 
