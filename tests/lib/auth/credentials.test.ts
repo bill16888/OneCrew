@@ -99,9 +99,9 @@ describe('Feature: ai-native-team-workspace, Property 1: bcrypt 双向认证正�
 
   it('rejects AI users even with the right password', async () => {
     userTable.clear();
-    userTable.set('ada@helio.local', {
+    userTable.set('ada@onecrew.local', {
       id: 'user_ai_ada',
-      email: 'ada@helio.local',
+      email: 'ada@onecrew.local',
       name: 'Ada',
       // Even with a hash, isAI=true must short-circuit.
       passwordHash: hashSync('whatever', 4),
@@ -109,7 +109,7 @@ describe('Feature: ai-native-team-workspace, Property 1: bcrypt 双向认证正�
     });
     const authorize = getAuthorize();
     const result = await authorize({
-      email: 'ada@helio.local',
+      email: 'ada@onecrew.local',
       password: 'whatever',
     });
     expect(result).toBeNull();

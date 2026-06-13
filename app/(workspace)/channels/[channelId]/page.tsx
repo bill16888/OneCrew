@@ -56,8 +56,8 @@ async function resolveChannelId(segment: string): Promise<string | null> {
   if (byId !== null) return byId.id;
 
   // Fallback: treat the segment as a friendly name. The seed creates
-  // `#general` / `#engineering`; the sidebar's mock list mirrors that
-  // (with the leading `#` stripped). We don't restrict by workspace
+  // `#general` / `#engineering`, and navigation uses those slugs with
+  // the leading `#` stripped. We don't restrict by workspace
   // because the MVP runs a single workspace; if multiple workspaces
   // ever share names this would need a `workspaceId` filter.
   const byName = await prisma.channel.findFirst({

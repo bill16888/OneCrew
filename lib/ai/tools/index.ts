@@ -561,7 +561,6 @@ function inferApprovalRiskLevel(
     // payload is the smallest hammer that lights this up in pino /
     // CloudWatch / Sentry breadcrumbs without pulling the logger
     // import into a hot synchronous helper.
-    // eslint-disable-next-line no-console
     console.warn(
       JSON.stringify({
         event: 'approval_payload_cyclic',

@@ -10,7 +10,7 @@
  * Why explicit-import instead of `vitest.config.ts > setupFiles`?
  *
  *   On Windows hosts where the workspace lives on a junction
- *   (e.g. the user folder under `C:\Users\...\helio02` is a junction
+ *   (e.g. the user folder under `C:\Users\...\OneCrew` is a junction
  *   pointing to `E:\MigratedFromC\...`), vite's jsdom worker resolves
  *   absolute paths through the junction target while the parent
  *   process uses the source. A shared `setupFiles` entry fails to

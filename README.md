@@ -92,9 +92,9 @@ After running `npm run prisma:seed` in development, these demo human users are a
 
 | User | Email | Password |
 | --- | --- | --- |
-| Alice | `alice@example.com` | `password123` |
-| Bob | `bob@example.com` | `password123` |
-| Mia | `mia@example.com` | `password123` |
+| Dev | `dev@onecrew.local` | `password123` |
+| PM | `pm@onecrew.local` | `password123` |
+| Mia | `mia@onecrew.local` | `password123` |
 
 The default AI teammates are Ada and Hopper. AI users do not log in directly.
 

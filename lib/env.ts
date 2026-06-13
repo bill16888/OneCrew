@@ -388,8 +388,8 @@ const envSchema = z.object({
    * - `SEED_EMAIL_DOMAIN`  — email domain for seeded users.
    *
    * Defaults are left empty here; `prisma/seed.ts` supplies the
-   * legacy `Helio` / `Ada` / `Hopper` / `helio.local` values ONLY in
-   * development so local dev + e2e keep working unchanged, while
+   * OneCrew / Ada / Hopper / onecrew.local fixture ONLY in development
+   * so local dev + e2e keep working unchanged, while
    * production refuses to seed without explicit configuration
    * (mirrors the SEED_HUMAN_PASSWORD discipline from audit M5).
    */
@@ -496,7 +496,6 @@ function loadEnv(): Env {
       : issue.message;
   }
 
-  // eslint-disable-next-line no-console
   console.error('❌ Missing env vars:', errors);
   process.exit(1);
 }

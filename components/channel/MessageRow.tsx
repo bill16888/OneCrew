@@ -20,8 +20,7 @@ import { cn } from '@/lib/utils';
  *
  * This component is presentational: it does not fetch data and does
  * not subscribe to realtime events. The channel page hands it props
- * derived from either mock data (task 2.4) or the live `message:new`
- * stream (task 3.9).
+ * derived from API responses or the live `message:new` stream.
  */
 
 /** Props for {@link MessageRow}. Mirrors the eventual `message:new` payload. */

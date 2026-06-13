@@ -185,7 +185,7 @@ my own identity.
   generic defaults:
   - `WORKSPACE_NAME` (default `My Workspace`)
   - `AI_AGENT_NAMES_JSON` (default `[{"name":"Architect","role":"engineer"},{"name":"Coordinator","role":"pm"}]`)
-  - The legacy `Helio Demo Workspace` string and `Ada` / `Hopper`
+  - The development `OneCrew Demo Workspace` string and `Ada` / `Hopper`
     seeds still seed when the env vars are unset, **but only in
     development mode** (`NODE_ENV !== 'production'`).
 - 16.2 `MENTION_ALIASES` (Chinese transliterations) is no longer
@@ -193,8 +193,8 @@ my own identity.
   `aiSettings.mentionAliases` with reasonable defaults if the env
   var doesn't supply them; existing logic from Audit H1 already
   consumes `aiSettings.mentionAliases`.
-- 16.3 Every README / documentation occurrence of `Helio` is
-  updated to the configurable workspace name OR replaced with a
+- 16.3 Every README / documentation occurrence of the old workspace brand
+  is updated to the configurable workspace name OR replaced with a
   neutral phrase. The single exception is historical context inside
   audit / spec markdown.
 - 16.4 The login page header reads from `WORKSPACE_NAME`. Tailwind

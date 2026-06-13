@@ -4,9 +4,9 @@
  * Provisions the single workspace required by the MVP. Every
  * brand-identifying value (workspace name, AI colleague names, email
  * domain) is read from environment configuration so the codebase ships
- * no hard-coded brand (Phase 1 Req 16). Development falls back to the
- * legacy `Helio` / `Ada` / `Hopper` / `helio.local` values so local
- * dev and e2e keep working unchanged; production refuses to seed
+ * no hard-coded external brand. Development falls back to the
+ * OneCrew / Ada / Hopper / onecrew.local fixture so local dev and e2e
+ * keep working unchanged; production refuses to seed
  * without explicit configuration (mirrors the SEED_HUMAN_PASSWORD
  * discipline from audit M5).
  *
@@ -33,13 +33,13 @@ const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const WORKSPACE_ID: string = process.env.WORKSPACE_ID ?? 'ws_default';
 
 /**
- * Legacy development defaults. These reproduce the pre-decoupling
- * fixture EXACTLY so local dev + e2e (`mia@helio.local` / Ada / Hopper)
- * keep working without any env configuration. Production never uses
- * these — see {@link requireProd}.
+ * Development defaults. These keep local dev + e2e
+ * (`mia@onecrew.local` / Ada / Hopper) working without any env
+ * configuration. Production never uses these — see
+ * {@link resolveBrandValue}.
  */
-const DEV_WORKSPACE_NAME = 'Helio Demo Workspace';
-const DEV_EMAIL_DOMAIN = 'helio.local';
+const DEV_WORKSPACE_NAME = 'OneCrew Demo Workspace';
+const DEV_EMAIL_DOMAIN = 'onecrew.local';
 const DEV_AGENTS_JSON = JSON.stringify([
   {
     id: 'user_ai_ada',

@@ -18,8 +18,8 @@ import { cn } from '@/lib/utils';
 
 /**
  * The 4 fixed kanban statuses (Requirement 3.1). The literal-union
- * mirrors the design.md `TaskStatus` so swapping mock data for the
- * real `Task` row from `TaskService.list()` is type-compatible.
+ * mirrors the design.md `TaskStatus` and the real `Task` row shape
+ * returned by `TaskService.list()`.
  */
 export type TaskStatus = 'Backlog' | 'InProgress' | 'InReview' | 'Done';
 

@@ -2,7 +2,7 @@
 
 ## Introduction
 
-AI-Native Team Workspace 是一个面向小型团队的 MVP 协作平台（类 Helio.im），AI 同事与人类成员在同一工作区中共享频道、任务看板与代码会话。本 MVP 基于 Next.js 14 (App Router) + TypeScript + Tailwind + shadcn/ui + Zustand + Socket.io + Prisma + PostgreSQL + Anthropic SDK + NextAuth.js 构建，采用单工作区硬编码模型，通过自定义 `server.ts` 同时启动 HTTP 服务、Socket.io 实时通道与 Agentic Loop 后台巡检。
+AI-Native Team Workspace 是一个面向小型团队的 MVP 协作平台（OneCrew），AI 同事与人类成员在同一工作区中共享频道、任务看板与代码会话。本 MVP 基于 Next.js 14 (App Router) + TypeScript + Tailwind + shadcn/ui + Zustand + Socket.io + Prisma + PostgreSQL + Anthropic SDK + NextAuth.js 构建，采用单工作区硬编码模型，通过自定义 `server.ts` 同时启动 HTTP 服务、Socket.io 实时通道与 Agentic Loop 后台巡检。
 
 平台核心能力包括：
 

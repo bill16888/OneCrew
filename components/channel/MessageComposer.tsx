@@ -8,10 +8,9 @@ import { cn } from '@/lib/utils';
  * MessageComposer — controlled textarea + send button at the bottom of
  * a channel page.
  *
- * Task 2.4 keeps this as a static skeleton: submission is wired to a
- * console.log placeholder (or the optional `onSubmit` prop) so the
- * channel page renders with a working composer that performs no
- * network I/O. The real `/api/messages` POST is connected in task 3.9.
+ * Controlled message input. The channel page supplies `onSubmit` to
+ * send messages through `/api/messages`; isolated renders can omit it
+ * and receive the typed payload in the console.
  *
  * Validation hints (Requirement 2.6, 2.7):
  *   - `content.trim().length === 0` disables the send button so users
@@ -35,7 +34,7 @@ export interface MessageComposerProps {
   channelId: string;
   /**
    * Optional submit callback. When omitted, the composer logs the
-   * payload to the console (task 2.4 placeholder behavior).
+   * payload to the console for isolated component renders.
    */
   onSubmit?: (input: { channelId: string; content: string }) => void | Promise<void>;
   /** Placeholder text shown in the empty textarea. */
@@ -65,7 +64,6 @@ export function MessageComposer({
     if (onSubmit) {
       await onSubmit(payload);
     } else {
-      // eslint-disable-next-line no-console
       console.log('[MessageComposer] submit', payload);
     }
     setContent('');

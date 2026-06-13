@@ -22,8 +22,7 @@ interface ChannelEntry {
   blurb: string;
 }
 
-// Mirrors the sidebar's mock channels (and the seed data in
-// `prisma/seed.ts`) until task 3.6 wires real `/api/channels` data.
+// Mirrors the seeded default channels used by `prisma/seed.ts`.
 const FEATURED_CHANNELS: readonly ChannelEntry[] = [
   { id: 'general', name: 'general', blurb: 'Team-wide announcements and casual chat.' },
   { id: 'engineering', name: 'engineering', blurb: 'Eng standups, code reviews, AI work.' },

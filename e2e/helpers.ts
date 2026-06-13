@@ -4,14 +4,14 @@
  * Login is the most common per-test prelude, so we hoist it into a
  * single helper that mirrors the form fields rendered by
  * `app/(auth)/login/page.tsx`. The seeded credentials match
- * `prisma/seed.ts` (`mia@helio.local` / `password123`) — keep these in
+ * `prisma/seed.ts` (`mia@onecrew.local` / `password123`) — keep these in
  * sync if the seed changes.
  */
 
 import { expect, type Page } from '@playwright/test';
 
 /** Default seeded human user (kept in lock-step with `prisma/seed.ts`). */
-export const DEFAULT_TEST_EMAIL = 'mia@helio.local';
+export const DEFAULT_TEST_EMAIL = 'mia@onecrew.local';
 export const DEFAULT_TEST_PASSWORD = 'password123';
 
 /**

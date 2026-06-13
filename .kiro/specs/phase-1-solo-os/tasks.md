@@ -109,7 +109,7 @@
 ## Sprint 4 — Brand decoupling (Req 16)
 
 > Goal: every visible identifier ships from env, defaults are
-> generic. No more "Helio" / "Ada" / "Hopper" surprises.
+> generic. No more old external brand / hard-coded AI name surprises.
 
 - [ ] **4.1** Add env vars: `WORKSPACE_NAME`,
   `AI_AGENT_NAMES_JSON`, `BRAND_COLOR_HEX`. Defaults documented
@@ -123,7 +123,7 @@
   expose via Tailwind config as `theme.colors.brand`.
 - [ ] **4.5** Login page header reads from `env.WORKSPACE_NAME`.
 - [ ] **4.6** README + LAUNCH_CHECKLIST + any user-facing markdown:
-  replace remaining `Helio` references with the configurable
+  replace remaining old brand references with the configurable
   workspace name. Audit / spec markdown is the only allowed
   exception.
 
