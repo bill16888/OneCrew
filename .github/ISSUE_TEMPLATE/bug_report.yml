@@ -1,0 +1,50 @@
+name: Bug report
+description: Report a reproducible problem in OneCrew
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please include enough detail for someone else to reproduce it.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction Steps
+      description: List exact steps, commands, or requests.
+      placeholder: |
+        1. Run ...
+        2. Open ...
+        3. See ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: |
+        OS:
+        Node:
+        npm:
+        Database:
+        Runtime: local / Docker / Railway
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or Screenshots
+      render: shell

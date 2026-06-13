@@ -1,8 +1,27 @@
 {
-  "name": "ai-native-team-workspace",
+  "name": "onecrew",
   "version": "0.1.0",
   "private": true,
-  "description": "AI-Native Team Workspace MVP — Next.js 15 + Socket.io + Anthropic Agentic Loop",
+  "description": "AI-native team workspace for human and AI teammates.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bill16888/OneCrew.git"
+  },
+  "bugs": {
+    "url": "https://github.com/bill16888/OneCrew/issues"
+  },
+  "homepage": "https://github.com/bill16888/OneCrew#readme",
+  "keywords": [
+    "ai",
+    "agents",
+    "collaboration",
+    "nextjs",
+    "react",
+    "prisma",
+    "socket.io",
+    "typescript"
+  ],
   "scripts": {
     "dev": "tsx watch server.ts",
     "build": "prisma generate && next build",
